@@ -184,7 +184,7 @@ func readInput() InputResult {
 }
 
 // printWelcomeBanner displays the welcome banner with project info.
-func printWelcomeBanner(model string) {
+func printWelcomeBanner(model, reasoning string) {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("6")). // cyan
@@ -211,10 +211,13 @@ func printWelcomeBanner(model string) {
 	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Model: ")+model,
+		labelStyle.Render("Model:     ")+model,
 	))
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Cwd:   ")+wd,
+		labelStyle.Render("Reasoning: ")+reasoning,
+	))
+	fmt.Fprintln(os.Stderr, infoStyle.Render(
+		labelStyle.Render("Cwd:       ")+wd,
 	))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, subtitleStyle.Render(

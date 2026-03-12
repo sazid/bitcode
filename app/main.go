@@ -129,7 +129,7 @@ func runInteractive(config *AgentConfig) {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
-	printWelcomeBanner(config.Model)
+	printWelcomeBanner(config.Model, config.Reasoning)
 
 	messages, toolDefs := newConversation(config)
 
