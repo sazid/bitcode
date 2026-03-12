@@ -2,34 +2,42 @@
 
 An AI coding assistant built in Go that uses LLMs to understand code and perform actions through tool calls. BitCode implements an agentic loop with multiple integrated tools.
 
+![BitCode Welcome Screen](assets/welcome-screenshot.png)
+
 ## Features
 
+- **Interactive Mode** — Full TUI with multiline input editor, bordered prompt, and keyboard shortcuts
+- **Single-Shot Mode** — Run a single prompt from the command line with `-p`
 - **Agent Loop** — Iterative LLM conversation with automatic tool calling (up to 50 turns)
 - **Read Tool** — Read files with optional line offset/limit
 - **Write Tool** — Create or overwrite files
 - **Edit Tool** — Surgical find-and-replace edits
 - **Glob Tool** — Fast file pattern matching
 - **Bash Tool** — Execute shell commands
-- **Markdown Rendering** — Rich terminal output with syntax-highlighted code snippets
-- **OpenRouter Integration** — Works with any OpenAI-compatible API
+- **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
+- **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
+- **OpenRouter Integration** — Works with any OpenAI-compatible API (including local servers)
 
 ## Requirements
 
 - Go 1.26+
-- An OpenRouter API key (or any OpenAI-compatible endpoint)
+- An OpenRouter API key (or any OpenAI-compatible endpoint; not required for localhost)
 
 ## Getting Started
 
 ### 1. Clone and configure
 
-```sh
-cp .env.example .env
-```
-
-Edit `.env` and add your API key:
+Create a `.env` file in the project root with your API key:
 
 ```
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
+```
+
+Optionally set the model and base URL:
+
+```
+OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 ### 2. Build
@@ -40,23 +48,65 @@ go build -o bitcode ./app
 
 ### 3. Run
 
+**Interactive mode** (default):
+
+```sh
+./bitcode
+```
+
+This launches a TUI with a multiline input editor. Use `Ctrl+S` to submit, `Enter` for newlines, `Esc` to clear, and `Ctrl+D` to exit.
+
+**Single-shot mode:**
+
 ```sh
 ./bitcode -p "Your prompt here"
 ```
 
-You can also change the model or endpoint via environment variables:
+**With reasoning effort:**
+
+```sh
+./bitcode --reasoning high -p "Refactor the agent loop"
+```
+
+**With a different model:**
 
 ```sh
 OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514 ./bitcode -p "Explain main.go"
+```
+
+**With a local server (no API key needed):**
+
+```sh
+OPENROUTER_BASE_URL=http://localhost:1234/v1 OPENROUTER_MODEL=local-model ./bitcode
 ```
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |---|---|---|
-| `OPENROUTER_API_KEY` | API key for OpenRouter | *(required)* |
+| `OPENROUTER_API_KEY` | API key for OpenRouter (not required for localhost) | *(required for remote)* |
 | `OPENROUTER_BASE_URL` | Base URL for the API | `https://openrouter.ai/api/v1` |
-| `OPENROUTER_MODEL` | Model to use | `anthropic/claude-haiku-4.5` |
+| `OPENROUTER_MODEL` | Model to use | `openrouter/free` |
+
+## Interactive Mode Keys
+
+| Key | Action |
+|---|---|
+| `Ctrl+S` | Submit input |
+| `Enter` | New line |
+| `Escape` | Clear input |
+| `Ctrl+C` | Clear input (exit if empty) |
+| `Ctrl+D` | Exit |
+
+## Commands
+
+Type these in the interactive prompt:
+
+| Command | Description |
+|---|---|
+| `/new` | Start a new conversation |
+| `/help` | Show help |
+| `/exit` | Exit BitCode |
 
 ## Example Prompts
 
@@ -206,12 +256,16 @@ The agent calls `Read` on an existing tool (e.g., `internal/tools/read.go`) to u
 
 ```
 app/
-  main.go           # Entry point and agent loop
-  conversation.go   # Conversation/message management
-  render.go         # Terminal rendering (markdown, events)
+  main.go           # Entry point, CLI flags, interactive REPL loop
+  agent.go          # Agent loop (LLM ↔ tool call cycle)
+  input.go          # TUI input editor (bubbletea textarea)
+  render.go         # Terminal rendering (markdown, spinner, events)
   system_prompt.go  # System prompt construction
 internal/
   event.go          # Event types for tool output
+  llm/
+    llm.go          # Provider interface, message types, content blocks
+    openai.go       # OpenAI-compatible provider (sync + streaming)
   tools/            # Tool implementations (read, write, edit, glob, bash)
 ```
 
