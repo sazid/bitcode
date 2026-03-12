@@ -121,12 +121,22 @@ Examples of risky actions that warrant user confirmation:
 	fmt.Fprintf(&sb, " - OS Version: %s\n", osVersion)
 	fmt.Fprintf(&sb, " - Current date and time: %s\n", dateTime)
 
-	// Add skill names and descriptions
+	// Add skill names, descriptions, and trigger conditions
 	skillList := skillManager.List()
 	if len(skillList) > 0 {
 		sb.WriteString("\n# Available Skills\n")
+		sb.WriteString("You can invoke skills using the Skill tool. Skills are user-defined prompt templates.\n")
+		sb.WriteString("When a user types \"/<skill-name>\" (e.g., /commit), they are referring to a skill. Use the Skill tool to invoke it.\n")
+		sb.WriteString("If a skill has a trigger condition, you should proactively invoke it when the condition is met.\n\n")
 		for _, s := range skillList {
-			fmt.Fprintf(&sb, " - %s: %s\n", s.Name, s.Description)
+			fmt.Fprintf(&sb, " - %s", s.Name)
+			if s.Description != "" {
+				fmt.Fprintf(&sb, ": %s", s.Description)
+			}
+			if s.Trigger != "" {
+				fmt.Fprintf(&sb, "\n   Trigger: %s", s.Trigger)
+			}
+			sb.WriteString("\n")
 		}
 	}
 

@@ -6,6 +6,77 @@ import (
 	"testing"
 )
 
+func TestParseFrontmatter(t *testing.T) {
+	t.Run("with valid frontmatter", func(t *testing.T) {
+		content := "---\nname: deploy\ndescription: Deploy the app\ntrigger: When the user asks to deploy\n---\nDo the deployment."
+		fm, body := parseFrontmatter(content)
+
+		if fm.Name != "deploy" {
+			t.Errorf("expected name 'deploy', got %q", fm.Name)
+		}
+		if fm.Description != "Deploy the app" {
+			t.Errorf("expected description 'Deploy the app', got %q", fm.Description)
+		}
+		if fm.Trigger != "When the user asks to deploy" {
+			t.Errorf("expected trigger, got %q", fm.Trigger)
+		}
+		if body != "Do the deployment." {
+			t.Errorf("expected body 'Do the deployment.', got %q", body)
+		}
+	})
+
+	t.Run("without frontmatter", func(t *testing.T) {
+		content := "# Simple Skill\nJust a prompt."
+		fm, body := parseFrontmatter(content)
+
+		if fm.Name != "" || fm.Description != "" || fm.Trigger != "" {
+			t.Errorf("expected zero-value frontmatter, got %+v", fm)
+		}
+		if body != content {
+			t.Errorf("expected original content, got %q", body)
+		}
+	})
+
+	t.Run("malformed YAML", func(t *testing.T) {
+		content := "---\n: invalid: yaml: [broken\n---\nBody here."
+		fm, body := parseFrontmatter(content)
+
+		if fm.Name != "" {
+			t.Errorf("expected zero-value frontmatter on malformed YAML, got %+v", fm)
+		}
+		if body != content {
+			t.Errorf("expected original content on malformed YAML, got %q", body)
+		}
+	})
+
+	t.Run("no closing delimiter", func(t *testing.T) {
+		content := "---\nname: test\nThis is not closed."
+		fm, body := parseFrontmatter(content)
+
+		if fm.Name != "" {
+			t.Errorf("expected zero-value frontmatter, got %+v", fm)
+		}
+		if body != content {
+			t.Errorf("expected original content, got %q", body)
+		}
+	})
+
+	t.Run("partial frontmatter fields", func(t *testing.T) {
+		content := "---\ndescription: Only a description\n---\nBody."
+		fm, body := parseFrontmatter(content)
+
+		if fm.Name != "" {
+			t.Errorf("expected empty name, got %q", fm.Name)
+		}
+		if fm.Description != "Only a description" {
+			t.Errorf("expected 'Only a description', got %q", fm.Description)
+		}
+		if body != "Body." {
+			t.Errorf("expected 'Body.', got %q", body)
+		}
+	})
+}
+
 func TestManager_LoadsSkillsFromDir(t *testing.T) {
 	dir := t.TempDir()
 	skillsDir := filepath.Join(dir, ".bitcode", "skills")
@@ -29,7 +100,7 @@ func TestManager_LoadsSkillsFromDir(t *testing.T) {
 	}
 
 	m := &Manager{skills: make(map[string]Skill)}
-	m.loadDir(skillsDir, "project")
+	m.loadDirRecursive(skillsDir, "project", "")
 
 	if len(m.skills) != 2 {
 		t.Fatalf("expected 2 skills, got %d", len(m.skills))
@@ -68,8 +139,8 @@ func TestManager_ProjectOverridesUser(t *testing.T) {
 	os.WriteFile(filepath.Join(projSkills, "commit.md"), []byte("# Project commit\nproject version"), 0o644)
 
 	m := &Manager{skills: make(map[string]Skill)}
-	m.loadDir(userSkills, "user")
-	m.loadDir(projSkills, "project")
+	m.loadDirRecursive(userSkills, "user", "")
+	m.loadDirRecursive(projSkills, "project", "")
 
 	s, ok := m.Get("commit")
 	if !ok {
@@ -97,9 +168,106 @@ func TestSkill_FormatPrompt(t *testing.T) {
 
 func TestManager_EmptyDir(t *testing.T) {
 	m := &Manager{skills: make(map[string]Skill)}
-	m.loadDir("/nonexistent/path", "user")
+	m.loadDirRecursive("/nonexistent/path", "user", "")
 
 	if len(m.List()) != 0 {
 		t.Error("expected no skills from nonexistent dir")
+	}
+}
+
+func TestManager_FrontmatterOverridesHeading(t *testing.T) {
+	dir := t.TempDir()
+	content := "---\nname: custom-name\ndescription: From frontmatter\ntrigger: When user asks to deploy\n---\n# Heading description\nBody of the skill."
+	os.WriteFile(filepath.Join(dir, "deploy.md"), []byte(content), 0o644)
+
+	m := &Manager{skills: make(map[string]Skill)}
+	m.loadDirRecursive(dir, "project", "")
+
+	// Frontmatter name should override filename
+	s, ok := m.Get("custom-name")
+	if !ok {
+		t.Fatal("expected skill registered as 'custom-name' from frontmatter name")
+	}
+
+	// Frontmatter description should override heading
+	if s.Description != "From frontmatter" {
+		t.Errorf("expected 'From frontmatter', got %q", s.Description)
+	}
+
+	if s.Trigger != "When user asks to deploy" {
+		t.Errorf("expected trigger, got %q", s.Trigger)
+	}
+
+	// Should NOT be registered under filename
+	if _, ok := m.Get("deploy"); ok {
+		t.Error("skill should not be registered under filename when frontmatter provides name")
+	}
+}
+
+func TestManager_NestedSkills(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "git")
+	os.MkdirAll(subDir, 0o755)
+
+	os.WriteFile(filepath.Join(dir, "review.md"), []byte("# Review code\nReview."), 0o644)
+	os.WriteFile(filepath.Join(subDir, "commit.md"), []byte("# Git commit\nCommit changes."), 0o644)
+
+	m := &Manager{skills: make(map[string]Skill)}
+	m.loadDirRecursive(dir, "project", "")
+
+	// Top-level skill
+	if _, ok := m.Get("review"); !ok {
+		t.Error("expected top-level 'review' skill")
+	}
+
+	// Nested skill with namespace
+	s, ok := m.Get("git:commit")
+	if !ok {
+		t.Fatal("expected namespaced 'git:commit' skill")
+	}
+	if s.Name != "git:commit" {
+		t.Errorf("expected name 'git:commit', got %q", s.Name)
+	}
+	if s.Description != "Git commit" {
+		t.Errorf("expected 'Git commit', got %q", s.Description)
+	}
+}
+
+func TestManager_MultipleDirectoryPrecedence(t *testing.T) {
+	base := t.TempDir()
+
+	// Simulate .agents/skills and .bitcode/skills at same level
+	agentsDir := filepath.Join(base, ".agents", "skills")
+	claudeDir := filepath.Join(base, ".claude", "skills")
+	bitcodeDir := filepath.Join(base, ".bitcode", "skills")
+	os.MkdirAll(agentsDir, 0o755)
+	os.MkdirAll(claudeDir, 0o755)
+	os.MkdirAll(bitcodeDir, 0o755)
+
+	os.WriteFile(filepath.Join(agentsDir, "deploy.md"), []byte("# Agents deploy\nfrom agents"), 0o644)
+	os.WriteFile(filepath.Join(claudeDir, "deploy.md"), []byte("# Claude deploy\nfrom claude"), 0o644)
+	os.WriteFile(filepath.Join(bitcodeDir, "deploy.md"), []byte("# Bitcode deploy\nfrom bitcode"), 0o644)
+
+	// Also put a skill only in .agents
+	os.WriteFile(filepath.Join(agentsDir, "unique.md"), []byte("# Unique\nonly in agents"), 0o644)
+
+	m := &Manager{skills: make(map[string]Skill)}
+	// Load in precedence order: .agents < .claude < .bitcode
+	m.loadDirRecursive(agentsDir, "project", "")
+	m.loadDirRecursive(claudeDir, "project", "")
+	m.loadDirRecursive(bitcodeDir, "project", "")
+
+	// .bitcode should win for "deploy"
+	s, ok := m.Get("deploy")
+	if !ok {
+		t.Fatal("expected 'deploy' skill")
+	}
+	if s.Description != "Bitcode deploy" {
+		t.Errorf("expected .bitcode to win, got %q", s.Description)
+	}
+
+	// Unique skill from .agents should still be present
+	if _, ok := m.Get("unique"); !ok {
+		t.Error("expected 'unique' skill from .agents")
 	}
 }

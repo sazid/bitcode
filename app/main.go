@@ -50,6 +50,7 @@ func main() {
 	toolManager.Register(&tools.BashTool{})
 
 	skillManager := skills.NewManager()
+	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
 
 	config := &AgentConfig{
 		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
