@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // InputResult represents the result of reading user input.
@@ -206,8 +207,8 @@ func printWelcomeBanner(model string) {
 	wd, _ := os.Getwd()
 
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ BitCode"))
-	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant"))
+	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ "+ansi.SetHyperlink("https://github.com/sazid/bitcode")+"BitCode"+ansi.ResetHyperlink()))
+	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
 		labelStyle.Render("Model: ")+model,
