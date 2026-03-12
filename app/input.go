@@ -49,7 +49,7 @@ func newInputModel() inputModel {
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
-	ta.SetHeight(3)
+	ta.SetHeight(1)
 	ta.MaxHeight = 20
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
@@ -86,7 +86,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyEscape:
 			// Clear current input
 			m.textarea.Reset()
-			m.textarea.SetHeight(3)
+			m.textarea.SetHeight(1)
 			return m, nil
 		case msg.Type == tea.KeyCtrlC:
 			// Clear input on first Ctrl+C, quit on empty
@@ -95,20 +95,20 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.textarea.Reset()
-			m.textarea.SetHeight(3)
+			m.textarea.SetHeight(1)
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
-		m.textarea.SetWidth(msg.Width - 4) // account for prompt prefix
+		m.textarea.SetWidth(msg.Width - 6) // account for border + padding
 	}
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 
-	// Auto-grow height based on content (minimum 3 lines)
-	lines := strings.Count(m.textarea.Value(), "\n") + 1
-	if lines < 3 {
-		lines = 3
+	// Auto-grow height based on content, including soft-wrapped lines
+	lines := m.textarea.LineCount()
+	if lines < 1 {
+		lines = 1
 	}
 	if lines > 20 {
 		lines = 20
@@ -119,17 +119,17 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m inputModel) View() string {
-	promptStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("6")) // cyan
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("6")).
+		Padding(0, 1)
 
 	hintStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240"))
 
-	prompt := promptStyle.Render("> ")
 	hint := hintStyle.Render("  ctrl+s submit · esc clear · ctrl+d exit")
 
-	return fmt.Sprintf("\n%s%s\n%s", prompt, m.textarea.View(), hint)
+	return fmt.Sprintf("\n%s\n%s", borderStyle.Render(m.textarea.View()), hint)
 }
 
 // readInput launches a bubbletea program to collect user input.

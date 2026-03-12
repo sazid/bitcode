@@ -166,6 +166,10 @@ func runInteractive(config *AgentConfig) {
 			continue
 		}
 
+		// Show the user's message
+		userStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+		fmt.Fprintf(os.Stderr, "\n%s %s\n", userStyle.Render(">"), result.Text)
+
 		messages = append(messages, llm.TextMessage(llm.RoleUser, result.Text))
 
 		ctx, cancel := context.WithCancel(context.Background())
