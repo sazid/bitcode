@@ -11,18 +11,10 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/tools"
 )
-
-type AppConfig struct {
-	Client          *openai.Client
-	Model           string
-	ReasoningEffort string
-	ToolManager     *tools.Manager
-}
 
 func main() {
 	_ = godotenv.Load()
@@ -56,13 +48,11 @@ func main() {
 	toolManager.Register(&tools.GlobTool{})
 	toolManager.Register(&tools.BashTool{})
 
-	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseUrl))
-
-	config := &AppConfig{
-		Client:          &client,
-		Model:           model,
-		ReasoningEffort: reasoningEffort,
-		ToolManager:     toolManager,
+	config := &AgentConfig{
+		Provider:    llm.NewOpenAIProvider(apiKey, baseUrl),
+		Model:       model,
+		Reasoning:   reasoningEffort,
+		ToolManager: toolManager,
 	}
 
 	if prompt != "" {
@@ -72,10 +62,52 @@ func main() {
 	}
 }
 
+func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
+	messages := []llm.Message{
+		llm.TextMessage(llm.RoleSystem, buildSystemPrompt()),
+	}
+	return messages, toolDefsFromManager(config.ToolManager)
+}
+
+func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
+	var defs []llm.ToolDef
+	for _, d := range m.ToolDefinitions() {
+		defs = append(defs, llm.ToolDef{
+			Name:        d.Name,
+			Description: d.Description,
+			Parameters:  d.Parameters,
+		})
+	}
+	return defs
+}
+
+func defaultCallbacks() AgentCallbacks {
+	var spin *Spinner
+	return AgentCallbacks{
+		OnContent: func(content string) {
+			renderMarkdown(os.Stderr, content)
+		},
+		OnThinking: func(active bool) {
+			if active {
+				spin = StartSpinner(os.Stderr)
+			} else if spin != nil {
+				spin.Stop()
+				spin = nil
+			}
+		},
+		OnEvent: func(e internal.Event) {
+			renderEvent(os.Stderr, e)
+		},
+		OnError: func(err error) {
+			fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
+		},
+	}
+}
+
 // runSingleShot runs a single prompt through the agent loop and exits.
-func runSingleShot(config *AppConfig, prompt string) {
-	conversation := newConversationWithTools(config)
-	conversation.AddMessage(openai.UserMessage(prompt))
+func runSingleShot(config *AgentConfig, prompt string) {
+	messages, toolDefs := newConversation(config)
+	messages = append(messages, llm.TextMessage(llm.RoleUser, prompt))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -87,27 +119,19 @@ func runSingleShot(config *AppConfig, prompt string) {
 		cancel()
 	}()
 
-	eventsCh := make(chan internal.Event, 16)
-	go func() {
-		for e := range eventsCh {
-			renderEvent(os.Stderr, e)
-		}
-	}()
-
-	runAgentLoop(ctx, config, conversation, eventsCh)
-	close(eventsCh)
+	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks())
 }
 
 // runInteractive runs the interactive REPL mode.
-func runInteractive(config *AppConfig) {
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))  // green
-	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))  // yellow
+func runInteractive(config *AgentConfig) {
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))    // red
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 	printWelcomeBanner(config.Model)
 
-	conversation := newConversationWithTools(config)
+	messages, toolDefs := newConversation(config)
 
 	for {
 		result := readInput()
@@ -123,7 +147,7 @@ func runInteractive(config *AppConfig) {
 				fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
 				return
 			case "/new":
-				conversation = newConversationWithTools(config)
+				messages, toolDefs = newConversation(config)
 				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Started new conversation"))
 				continue
 			case "/help":
@@ -142,10 +166,8 @@ func runInteractive(config *AppConfig) {
 			continue
 		}
 
-		conversation.AddMessage(openai.UserMessage(result.Text))
+		messages = append(messages, llm.TextMessage(llm.RoleUser, result.Text))
 
-		// Create a cancellable context for this turn.
-		// Ctrl+C interrupts the current response, not the whole program.
 		ctx, cancel := context.WithCancel(context.Background())
 
 		sigCh := make(chan os.Signal, 1)
@@ -160,103 +182,9 @@ func runInteractive(config *AppConfig) {
 			}
 		}()
 
-		eventsCh := make(chan internal.Event, 16)
-		go func() {
-			for e := range eventsCh {
-				renderEvent(os.Stderr, e)
-			}
-		}()
-
-		runAgentLoop(ctx, config, conversation, eventsCh)
-		close(eventsCh)
+		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks())
 
 		signal.Stop(sigCh)
 		cancel()
-	}
-}
-
-// newConversationWithTools creates a new conversation pre-loaded with the system prompt and tool definitions.
-func newConversationWithTools(config *AppConfig) *Conversation {
-	conversation := NewConversation()
-	conversation.AddMessage(openai.SystemMessage(buildSystemPrompt()))
-	for _, td := range tools.ToOpenAITools(config.ToolManager.ToolDefinitions()) {
-		conversation.AddTool(td)
-	}
-	return conversation
-}
-
-// runAgentLoop runs the agent loop: sending messages to the LLM, processing tool calls,
-// and iterating until the model stops or the context is cancelled.
-func runAgentLoop(ctx context.Context, config *AppConfig, conversation *Conversation, eventsCh chan<- internal.Event) {
-	maxTurns := 50
-
-	for turn := 0; turn < maxTurns; turn++ {
-		if ctx.Err() != nil {
-			return
-		}
-
-		params := openai.ChatCompletionNewParams{
-			ReasoningEffort: openai.ReasoningEffort(config.ReasoningEffort),
-			Model:           config.Model,
-			Messages:        conversation.Messages,
-			Tools:           conversation.Tools,
-			N:               openai.Int(1),
-		}
-
-		resp, err := config.Client.Chat.Completions.New(ctx, params)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
-			return
-		}
-		if len(resp.Choices) == 0 {
-			fmt.Fprintln(os.Stderr, "\033[31mError: No choices in response\033[0m")
-			return
-		}
-
-		choice := resp.Choices[0]
-		param := choice.Message.ToParam()
-		conversation.AddMessage(param)
-
-		if choice.Message.Content != "" {
-			renderMarkdown(os.Stderr, choice.Message.Content)
-		}
-
-		switch choice.FinishReason {
-		case "tool_calls":
-			for _, toolCall := range choice.Message.ToolCalls {
-				if ctx.Err() != nil {
-					return
-				}
-
-				toolName := toolCall.Function.Name
-				toolInput := toolCall.Function.Arguments
-
-				result, err := config.ToolManager.ExecuteTool(toolName, toolInput, eventsCh)
-				content := result.Content
-				if err != nil {
-					eventsCh <- internal.Event{
-						Name:    toolName,
-						Args:    []string{},
-						Message: fmt.Sprintf("Error: %v", err),
-						IsError: true,
-					}
-					content = fmt.Sprintf("Error: %v", err)
-				}
-				conversation.AddMessage(openai.ToolMessage(content, toolCall.ID))
-			}
-		case "stop":
-			return
-		default:
-			return
-		}
-	}
-
-	eventsCh <- internal.Event{
-		Name:    "System",
-		Args:    []string{},
-		Message: fmt.Sprintf("Max turn (%d) limit reached.", maxTurns),
 	}
 }
