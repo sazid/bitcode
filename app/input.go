@@ -45,11 +45,11 @@ type inputModel struct {
 
 func newInputModel() inputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Ask anything..."
+	ta.Placeholder = "Ask anything... (Enter for newline, Ctrl+S to submit)"
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
-	ta.SetHeight(1)
+	ta.SetHeight(3)
 	ta.MaxHeight = 20
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
@@ -57,11 +57,6 @@ func newInputModel() inputModel {
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	ta.FocusedStyle.Text = lipgloss.NewStyle()
 	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
-
-	// Remap: Enter submits, Alt+Enter / Shift+Enter inserts newline
-	ta.KeyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("alt+enter", "shift+enter"),
-	)
 
 	ta.Focus()
 
@@ -81,7 +76,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, inputKeys.Quit):
 			m.quit = true
 			return m, tea.Quit
-		case msg.Type == tea.KeyEnter:
+		case key.Matches(msg, inputKeys.Submit):
 			text := strings.TrimSpace(m.textarea.Value())
 			if text != "" {
 				m.submitted = true
@@ -91,6 +86,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyEscape:
 			// Clear current input
 			m.textarea.Reset()
+			m.textarea.SetHeight(3)
 			return m, nil
 		case msg.Type == tea.KeyCtrlC:
 			// Clear input on first Ctrl+C, quit on empty
@@ -99,6 +95,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.textarea.Reset()
+			m.textarea.SetHeight(3)
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -108,10 +105,10 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 
-	// Auto-grow height based on content
+	// Auto-grow height based on content (minimum 3 lines)
 	lines := strings.Count(m.textarea.Value(), "\n") + 1
-	if lines < 1 {
-		lines = 1
+	if lines < 3 {
+		lines = 3
 	}
 	if lines > 20 {
 		lines = 20
@@ -130,7 +127,7 @@ func (m inputModel) View() string {
 		Foreground(lipgloss.Color("240"))
 
 	prompt := promptStyle.Render("> ")
-	hint := hintStyle.Render("  enter submit · esc clear · ctrl+d exit")
+	hint := hintStyle.Render("  ctrl+s submit · esc clear · ctrl+d exit")
 
 	return fmt.Sprintf("\n%s%s\n%s", prompt, m.textarea.View(), hint)
 }
@@ -223,8 +220,8 @@ func printHelp() {
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/exit"), descStyle.Render("Exit BitCode"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, headerStyle.Render("  Keys"))
-	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Enter"), descStyle.Render("Submit input"))
-	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Alt+Enter"), descStyle.Render("New line"))
+	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Ctrl+S"), descStyle.Render("Submit input"))
+	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Enter"), descStyle.Render("New line"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Escape"), descStyle.Render("Clear input"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Ctrl+C"), descStyle.Render("Clear input / exit if empty"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Ctrl+D"), descStyle.Render("Exit"))
