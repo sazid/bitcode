@@ -213,6 +213,9 @@ func printWelcomeBanner(model, reasoning string) {
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
 		labelStyle.Render("Model:     ")+model,
 	))
+	if reasoning == "" {
+		reasoning = "default"
+	}
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
 		labelStyle.Render("Reasoning: ")+reasoning,
 	))

@@ -83,13 +83,16 @@ func buildOpenAIParams(params CompletionParams) openai.ChatCompletionNewParams {
 		}))
 	}
 
-	return openai.ChatCompletionNewParams{
-		Model:           params.Model,
-		Messages:        msgs,
-		Tools:           tools,
-		ReasoningEffort: openai.ReasoningEffort(params.ReasoningEffort),
-		N:               openai.Int(1),
+	p := openai.ChatCompletionNewParams{
+		Model:    params.Model,
+		Messages: msgs,
+		Tools:    tools,
+		N:        openai.Int(1),
 	}
+	if params.ReasoningEffort != "" {
+		p.ReasoningEffort = openai.ReasoningEffort(params.ReasoningEffort)
+	}
+	return p
 }
 
 func responseFromChoice(choice openai.ChatCompletionChoice) *CompletionResponse {

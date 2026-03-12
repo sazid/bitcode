@@ -22,7 +22,7 @@ func main() {
 	var prompt string
 	var reasoningEffort string
 	flag.StringVar(&prompt, "p", "", "Prompt to send to LLM (omit for interactive mode)")
-	flag.StringVar(&reasoningEffort, "reasoning", "medium", "Reasoning effort: none, minimal, low, medium, high, xhigh")
+	flag.StringVar(&reasoningEffort, "reasoning", "", "Reasoning effort: low, medium, high (omit to let the model decide)")
 	flag.Parse()
 
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
