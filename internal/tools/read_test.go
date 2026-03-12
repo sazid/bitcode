@@ -193,7 +193,6 @@ func TestReadTool_EmitsEvent(t *testing.T) {
 	}
 }
 
-
 func TestReadTool_RelativePath(t *testing.T) {
 	// Write a file in the current working directory temp space, then use a relative path.
 	dir := t.TempDir()

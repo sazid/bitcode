@@ -65,10 +65,10 @@ func TestGlobTool_SimpleExtension(t *testing.T) {
 
 func TestGlobTool_DoubleStarRecursive(t *testing.T) {
 	root := buildTree(t, map[string]string{
-		"main.go":          "",
-		"pkg/foo/foo.go":   "",
-		"pkg/bar/bar.go":   "",
-		"pkg/bar/bar.txt":  "",
+		"main.go":         "",
+		"pkg/foo/foo.go":  "",
+		"pkg/bar/bar.go":  "",
+		"pkg/bar/bar.txt": "",
 	})
 
 	result, err := executeGlob(t, GlobInput{Pattern: "**/*.go", Path: root})
@@ -218,4 +218,3 @@ func nonEmptyLines(s string) []string {
 	}
 	return out
 }
-
