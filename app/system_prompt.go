@@ -8,9 +8,11 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/sazid/bitcode/internal/skills"
 )
 
-func buildSystemPrompt() string {
+func buildSystemPrompt(skillManager *skills.Manager) string {
 	wd, _ := os.Getwd()
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -118,6 +120,15 @@ Examples of risky actions that warrant user confirmation:
 	fmt.Fprintf(&sb, " - Shell: %s\n", shell)
 	fmt.Fprintf(&sb, " - OS Version: %s\n", osVersion)
 	fmt.Fprintf(&sb, " - Current date and time: %s\n", dateTime)
+
+	// Add skill names and descriptions
+	skillList := skillManager.List()
+	if len(skillList) > 0 {
+		sb.WriteString("\n# Available Skills\n")
+		for _, s := range skillList {
+			fmt.Fprintf(&sb, " - %s: %s\n", s.Name, s.Description)
+		}
+	}
 
 	return sb.String()
 }

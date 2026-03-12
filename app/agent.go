@@ -6,16 +6,18 @@ import (
 
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
 
 const maxAgentTurns = 50
 
 type AgentConfig struct {
-	Provider    llm.Provider
-	Model       string
-	Reasoning   string
-	ToolManager *tools.Manager
+	Provider     llm.Provider
+	Model        string
+	Reasoning    string
+	ToolManager  *tools.Manager
+	SkillManager *skills.Manager
 }
 
 type AgentCallbacks struct {

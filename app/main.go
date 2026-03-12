@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
 
@@ -48,11 +49,14 @@ func main() {
 	toolManager.Register(&tools.GlobTool{})
 	toolManager.Register(&tools.BashTool{})
 
+	skillManager := skills.NewManager()
+
 	config := &AgentConfig{
-		Provider:    llm.NewOpenAIProvider(apiKey, baseUrl),
-		Model:       model,
-		Reasoning:   reasoningEffort,
-		ToolManager: toolManager,
+		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
+		Model:        model,
+		Reasoning:    reasoningEffort,
+		ToolManager:  toolManager,
+		SkillManager: skillManager,
 	}
 
 	if prompt != "" {
@@ -64,7 +68,7 @@ func main() {
 
 func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
 	messages := []llm.Message{
-		llm.TextMessage(llm.RoleSystem, buildSystemPrompt()),
+		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager)),
 	}
 	return messages, toolDefsFromManager(config.ToolManager)
 }
@@ -142,7 +146,15 @@ func runInteractive(config *AgentConfig) {
 		}
 
 		if result.Command != "" {
-			switch result.Command {
+			// Extract command name and optional arguments
+			cmdParts := strings.SplitN(result.Command, " ", 2)
+			cmdName := cmdParts[0]
+			cmdArgs := ""
+			if len(cmdParts) > 1 {
+				cmdArgs = strings.TrimSpace(cmdParts[1])
+			}
+
+			switch cmdName {
 			case "/exit", "/quit":
 				fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
 				return
@@ -151,14 +163,25 @@ func runInteractive(config *AgentConfig) {
 				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Started new conversation"))
 				continue
 			case "/help":
-				printHelp()
+				printHelp(config.SkillManager)
 				continue
 			default:
-				fmt.Fprintln(os.Stderr, errorStyle.Render(
-					fmt.Sprintf("\n  Unknown command: %s", result.Command),
-				))
-				fmt.Fprintln(os.Stderr, dimStyle.Render("  Type /help for available commands"))
-				continue
+				// Check if it's a skill
+				skillName := strings.TrimPrefix(cmdName, "/")
+				if skill, ok := config.SkillManager.Get(skillName); ok {
+					prompt := skill.FormatPrompt(cmdArgs)
+
+					skillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+					fmt.Fprintf(os.Stderr, "\n%s %s\n", skillStyle.Render("⚡"), skill.Name)
+
+					result.Text = prompt
+				} else {
+					fmt.Fprintln(os.Stderr, errorStyle.Render(
+						fmt.Sprintf("\n  Unknown command: %s", cmdName),
+					))
+					fmt.Fprintln(os.Stderr, dimStyle.Render("  Type /help for available commands"))
+					continue
+				}
 			}
 		}
 

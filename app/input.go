@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sazid/bitcode/internal/skills"
 )
 
 // InputResult represents the result of reading user input.
@@ -230,8 +231,8 @@ func printWelcomeBanner(model, reasoning string) {
 	))
 }
 
-// printHelp displays available commands.
-func printHelp() {
+// printHelp displays available commands and skills.
+func printHelp(skillMgr *skills.Manager) {
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("6"))
@@ -243,11 +244,28 @@ func printHelp() {
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("7"))
 
+	sourceStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, headerStyle.Render("  Commands"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/new"), descStyle.Render("Start a new conversation"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/help"), descStyle.Render("Show this help message"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/exit"), descStyle.Render("Exit BitCode"))
+
+	if skillList := skillMgr.List(); len(skillList) > 0 {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, headerStyle.Render("  Skills"))
+		for _, s := range skillList {
+			desc := s.Description
+			if desc == "" {
+				desc = "(no description)"
+			}
+			src := sourceStyle.Render(fmt.Sprintf("[%s]", s.Source))
+			fmt.Fprintf(os.Stderr, "  %s %s %s\n", cmdStyle.Render("/"+s.Name), descStyle.Render(desc), src)
+		}
+	}
+
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, headerStyle.Render("  Keys"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("Ctrl+S"), descStyle.Render("Submit input"))
