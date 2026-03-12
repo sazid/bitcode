@@ -5,12 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
-	"github.com/sazid/bitcode/internal"
-	"github.com/sazid/bitcode/internal/tools"
 	"github.com/joho/godotenv"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/tools"
 )
 
 type HarnessData struct {
@@ -21,7 +22,9 @@ func main() {
 	_ = godotenv.Load()
 
 	var prompt string
+	var reasoningEffort string
 	flag.StringVar(&prompt, "p", "", "Prompt to send to LLM")
+	flag.StringVar(&reasoningEffort, "reasoning", "medium", "Reasoning effort: none, minimal, low, medium, high, xhigh")
 	flag.Parse()
 
 	if prompt == "" {
@@ -35,12 +38,12 @@ func main() {
 		baseUrl = "https://openrouter.ai/api/v1"
 	}
 	if model == "" {
-		// model = "openrouter/free"
-		model = "anthropic/claude-haiku-4.5"
+		model = "openrouter/free"
 	}
 
-	if apiKey == "" {
-		panic("Env variable OPENROUTER_API_KEY not found")
+	isLocalhost := strings.HasPrefix(baseUrl, "http://localhost") || strings.HasPrefix(baseUrl, "http://127.0.0.1")
+	if apiKey == "" && !isLocalhost {
+		panic("Env variable OPENROUTER_API_KEY not found (not required when base URL points to localhost)")
 	}
 
 	toolManager := tools.NewManager()
@@ -77,8 +80,7 @@ func main() {
 			break
 		}
 		params := openai.ChatCompletionNewParams{
-			// Any of "none", "minimal", "low", "medium", "high", "xhigh".
-			ReasoningEffort: "none",
+			ReasoningEffort: openai.ReasoningEffort(reasoningEffort),
 			Model:           model,
 			Messages:        conversation.Messages,
 			Tools:           conversation.Tools,
