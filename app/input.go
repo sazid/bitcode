@@ -138,6 +138,10 @@ func (m *inputModel) resizeTextarea() {
 }
 
 func (m inputModel) View() string {
+	if m.submitted || m.quit {
+		return ""
+	}
+
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("6")).
