@@ -49,7 +49,7 @@ func newInputModel() inputModel {
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0 // no limit
-	ta.SetHeight(1)
+	ta.SetHeight(2)
 	ta.MaxHeight = 20
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
@@ -86,7 +86,7 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyEscape:
 			// Clear current input
 			m.textarea.Reset()
-			m.textarea.SetHeight(1)
+			m.textarea.SetHeight(2)
 			return m, nil
 		case msg.Type == tea.KeyCtrlC:
 			// Clear input on first Ctrl+C, quit on empty
@@ -95,27 +95,46 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.textarea.Reset()
-			m.textarea.SetHeight(1)
+			m.textarea.SetHeight(2)
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.textarea.SetWidth(msg.Width - 6) // account for border + padding
 	}
 
+	// Pre-grow by 1 line before textarea processes the keystroke so its
+	// internal viewport has room and doesn't scroll content off the top.
+	m.resizeTextarea()
+	if h := m.textarea.Height(); h < 20 {
+		m.textarea.SetHeight(h + 1)
+	}
+
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 
-	// Auto-grow height based on content, including soft-wrapped lines
-	lines := m.textarea.LineCount()
-	if lines < 1 {
-		lines = 1
-	}
-	if lines > 20 {
-		lines = 20
-	}
-	m.textarea.SetHeight(lines)
+	// Set exact height after content has changed.
+	m.resizeTextarea()
 
 	return m, cmd
+}
+
+func (m *inputModel) resizeTextarea() {
+	visLines := 0
+	width := m.textarea.Width()
+	for line := range strings.SplitSeq(m.textarea.Value(), "\n") {
+		if width > 0 && len(line) > width {
+			visLines += (len(line) + width - 1) / width
+		} else {
+			visLines++
+		}
+	}
+	if visLines < 2 {
+		visLines = 2
+	}
+	if visLines > 20 {
+		visLines = 20
+	}
+	m.textarea.SetHeight(visLines)
 }
 
 func (m inputModel) View() string {
