@@ -14,6 +14,8 @@ An AI coding assistant built in Go that uses LLMs to understand code and perform
 - **Edit Tool** — Surgical find-and-replace edits
 - **Glob Tool** — Fast file pattern matching
 - **Bash Tool** — Execute shell commands
+- **System Reminders** — Dynamic context injection via `<system-reminder>` tags with [plugin support](docs/system-reminders.md)
+- **Skills** — User-defined prompt templates loaded from `.agents/`, `.claude/`, or `.bitcode/` directories
 - **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
 - **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
 - **OpenRouter Integration** — Works with any OpenAI-compatible API (including local servers)
@@ -252,6 +254,26 @@ The agent calls `Glob` to find `**/glob.go`, then `Read` to examine the implemen
 
 The agent calls `Read` on an existing tool (e.g., `internal/tools/read.go`) to understand the pattern, then `Write` to create `grep.go`, then `Bash` to run `go build ./...` to verify it compiles.
 
+## System Reminders
+
+BitCode can inject dynamic context into the LLM conversation each turn using `<system-reminder>` tags. Reminders are evaluated before every API call and injected into a copy of the messages — the stored conversation history stays clean.
+
+Built-in reminders handle skill availability and conversation length warnings. You can add your own by dropping plugin files into a `reminders/` subdirectory:
+
+```yaml
+# .bitcode/reminders/run-tests.yaml
+id: run-tests
+content: |
+  Files were just edited. Consider running tests to verify the changes.
+schedule:
+  kind: condition
+  condition: "after_tool:Edit,Write"
+  max_fires: 5
+priority: 3
+```
+
+Plugins are loaded from `{.agents,.claude,.bitcode}/reminders/` at both the user home and project level. See [docs/system-reminders.md](docs/system-reminders.md) for the full architecture, schedule kinds, condition expressions, and more examples.
+
 ## Project Structure
 
 ```
@@ -266,7 +288,11 @@ internal/
   llm/
     llm.go          # Provider interface, message types, content blocks
     openai.go       # OpenAI-compatible provider (sync + streaming)
+  reminder/         # System reminder framework (evaluation, injection, plugins)
+  skills/           # Skill discovery and management
   tools/            # Tool implementations (read, write, edit, glob, bash)
+docs/
+  system-reminders.md  # System reminders architecture and plugin guide
 ```
 
 ## License
