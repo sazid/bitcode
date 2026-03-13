@@ -13,8 +13,13 @@ type SkillInput struct {
 	Args  string `json:"args,omitempty"`
 }
 
+// SkillLookup is the subset of skill management that SkillTool needs.
+type SkillLookup interface {
+	Get(name string) (skills.Skill, bool)
+}
+
 type SkillTool struct {
-	SkillManager *skills.Manager
+	SkillManager SkillLookup
 }
 
 var _ Tool = (*SkillTool)(nil)
