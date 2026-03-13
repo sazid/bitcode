@@ -49,6 +49,7 @@ func main() {
 	toolManager.Register(&tools.EditTool{})
 	toolManager.Register(&tools.GlobTool{})
 	toolManager.Register(&tools.BashTool{})
+	toolManager.Register(&tools.WebSearchTool{})
 
 	skillManager := skills.NewManager()
 	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
