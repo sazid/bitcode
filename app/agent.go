@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
@@ -18,6 +20,7 @@ type AgentConfig struct {
 	Reasoning    string
 	ToolManager  *tools.Manager
 	SkillManager *skills.Manager
+	ReminderMgr  *reminder.Manager
 }
 
 type AgentCallbacks struct {
@@ -40,9 +43,26 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 	}()
 	defer func() { close(eventsCh); <-done }()
 
+	startTime := time.Now()
+	var lastToolNames []string
+
 	for turn := 0; turn < maxAgentTurns; turn++ {
 		if ctx.Err() != nil {
 			return
+		}
+
+		// Evaluate reminders and inject into a copy for the API
+		messagesForAPI := *messages
+		if cfg.ReminderMgr != nil {
+			state := &reminder.ConversationState{
+				Turn:          turn,
+				Messages:      *messages,
+				LastToolCalls: lastToolNames,
+				ElapsedTime:   time.Since(startTime),
+			}
+			if active := cfg.ReminderMgr.Evaluate(state); len(active) > 0 {
+				messagesForAPI = reminder.InjectReminders(*messages, active)
+			}
 		}
 
 		if cb.OnThinking != nil {
@@ -51,7 +71,7 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 		resp, err := cfg.Provider.Complete(ctx, llm.CompletionParams{
 			Model:           cfg.Model,
-			Messages:        *messages,
+			Messages:        messagesForAPI,
 			Tools:           toolDefs,
 			ReasoningEffort: cfg.Reasoning,
 		}, nil)
@@ -70,6 +90,7 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 			return
 		}
 
+		// Store the original response in the real message history
 		*messages = append(*messages, resp.Message)
 
 		if text := resp.Message.Text(); text != "" && cb.OnContent != nil {
@@ -78,10 +99,12 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 		switch resp.FinishReason {
 		case llm.FinishToolCalls:
+			lastToolNames = make([]string, 0, len(resp.Message.ToolCalls))
 			for _, tc := range resp.Message.ToolCalls {
 				if ctx.Err() != nil {
 					return
 				}
+				lastToolNames = append(lastToolNames, tc.Name)
 				result, err := cfg.ToolManager.ExecuteTool(tc.Name, tc.Arguments, eventsCh)
 				content := result.Content
 				if err != nil {
@@ -98,6 +121,7 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					ToolCallID: tc.ID,
 				})
 			}
+
 		case llm.FinishStop:
 			return
 		default:

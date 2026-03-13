@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
@@ -52,12 +53,44 @@ func main() {
 	skillManager := skills.NewManager()
 	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
 
+	reminderMgr := reminder.NewManager()
+
+	// Register built-in reminders
+	reminderMgr.Register(reminder.Reminder{
+		ID:       "skill-availability",
+		Content:  buildSkillReminderContent(skillManager),
+		Schedule: reminder.Schedule{Kind: reminder.ScheduleOneShot},
+		Source:   "builtin",
+		Priority: 0,
+		Active:   true,
+	})
+	reminderMgr.Register(reminder.Reminder{
+		ID:      "conversation-length",
+		Content: "The conversation is getting long. Consider summarizing the work done so far and starting a new conversation with /new if the current task is complete.",
+		Schedule: reminder.Schedule{
+			Kind:     reminder.ScheduleCondition,
+			MaxFires: 2,
+			Condition: func(state *reminder.ConversationState) bool {
+				return len(state.Messages) > 80
+			},
+		},
+		Source:   "builtin",
+		Priority: 1,
+		Active:   true,
+	})
+
+	// Load reminder plugins from disk
+	for _, r := range reminder.LoadPlugins() {
+		reminderMgr.Register(r)
+	}
+
 	config := &AgentConfig{
 		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
 		Model:        model,
 		Reasoning:    reasoningEffort,
 		ToolManager:  toolManager,
 		SkillManager: skillManager,
+		ReminderMgr:  reminderMgr,
 	}
 
 	if prompt != "" {
@@ -215,4 +248,25 @@ func runInteractive(config *AgentConfig) {
 		signal.Stop(sigCh)
 		cancel()
 	}
+}
+
+// buildSkillReminderContent creates reminder content listing available skills.
+func buildSkillReminderContent(sm *skills.Manager) string {
+	skillList := sm.List()
+	if len(skillList) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Available skills (invoke via the Skill tool):\n")
+	for _, s := range skillList {
+		fmt.Fprintf(&sb, "- %s", s.Name)
+		if s.Description != "" {
+			fmt.Fprintf(&sb, ": %s", s.Description)
+		}
+		if s.Trigger != "" {
+			fmt.Fprintf(&sb, " (Trigger: %s)", s.Trigger)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
