@@ -90,6 +90,10 @@ func coloredBullet(isError bool) string {
 }
 
 func renderEvent(w io.Writer, e internal.Event) {
+	if e.PreviewType == internal.PreviewGuard {
+		renderGuardEvent(w, e)
+		return
+	}
 	if e.PreviewType == internal.PreviewBash {
 		renderBashEvent(w, e)
 		return
@@ -105,6 +109,15 @@ func renderEvent(w io.Writer, e internal.Event) {
 	for _, line := range e.Preview {
 		fmt.Fprintf(w, "   %s\n", renderPreviewLine(e.PreviewType, line))
 	}
+}
+
+func renderGuardEvent(w io.Writer, e internal.Event) {
+	tool := ""
+	if len(e.Args) > 0 {
+		tool = e.Args[0]
+	}
+	fmt.Fprintf(w, "\n\033[33m⏺ Guard(%s)\033[0m\n", tool)
+	fmt.Fprintf(w, "⎿  \033[33m%s\033[0m\n", e.Message)
 }
 
 func renderBashEvent(w io.Writer, e internal.Event) {

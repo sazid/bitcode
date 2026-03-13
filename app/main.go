@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
@@ -85,6 +86,40 @@ func main() {
 		reminderMgr.Register(r)
 	}
 
+	// Guard system
+	guardMgr := guard.NewManager()
+	guardMgr.AddRule(&guard.DangerousCommandRule{})
+	guardMgr.AddRule(&guard.WorkingDirRule{})
+	guardMgr.AddRule(&guard.SensitiveFileRule{})
+	for _, r := range guard.LoadPlugins() {
+		guardMgr.AddRule(r)
+	}
+	guardMgr.AddRule(&guard.DefaultPolicyRule{})
+
+	// Optional LLM guard
+	if os.Getenv("BITCODE_GUARD_LLM") == "true" {
+		guardModel := os.Getenv("BITCODE_GUARD_LLM_MODEL")
+		if guardModel == "" {
+			guardModel = model
+		}
+		guardBaseURL := os.Getenv("BITCODE_GUARD_LLM_BASE_URL")
+		if guardBaseURL == "" {
+			guardBaseURL = baseUrl
+		}
+		guardAPIKey := os.Getenv("BITCODE_GUARD_LLM_API_KEY")
+		if guardAPIKey == "" {
+			guardAPIKey = apiKey
+		}
+		guardProvider := llm.NewOpenAIProvider(guardAPIKey, guardBaseURL)
+		guardMgr.SetLLMValidator(guard.NewLLMGuard(guardProvider, guardModel))
+	}
+
+	isNonInteractive := prompt != ""
+	if isNonInteractive {
+		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
+	}
+	// Interactive permission handler is set in runInteractive
+
 	config := &AgentConfig{
 		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
 		Model:        model,
@@ -92,6 +127,7 @@ func main() {
 		ToolManager:  toolManager,
 		SkillManager: skillManager,
 		ReminderMgr:  reminderMgr,
+		GuardMgr:     guardMgr,
 	}
 
 	if prompt != "" {
@@ -120,8 +156,22 @@ func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
 	return defs
 }
 
-func defaultCallbacks() AgentCallbacks {
+func defaultCallbacks(guardMgr *guard.Manager) AgentCallbacks {
 	var spin *Spinner
+
+	// Wire interactive permission handler with spinner pause/resume
+	if guardMgr != nil {
+		guardMgr.SetPermissionHandler(guard.TerminalPermissionHandler(
+			func() {
+				if spin != nil {
+					spin.Stop()
+					spin = nil
+				}
+			},
+			nil, // no resume — spinner restarts on next OnThinking(true)
+		))
+	}
+
 	return AgentCallbacks{
 		OnContent: func(content string) {
 			renderMarkdown(os.Stderr, content)
@@ -158,7 +208,7 @@ func runSingleShot(config *AgentConfig, prompt string) {
 		cancel()
 	}()
 
-	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks())
+	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config.GuardMgr))
 }
 
 // runInteractive runs the interactive REPL mode.
@@ -244,7 +294,7 @@ func runInteractive(config *AgentConfig) {
 			}
 		}()
 
-		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks())
+		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config.GuardMgr))
 
 		signal.Stop(sigCh)
 		cancel()

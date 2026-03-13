@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
@@ -21,6 +22,7 @@ type AgentConfig struct {
 	ToolManager  *tools.Manager
 	SkillManager *skills.Manager
 	ReminderMgr  *reminder.Manager
+	GuardMgr     *guard.Manager
 }
 
 type AgentCallbacks struct {
@@ -105,6 +107,42 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					return
 				}
 				lastToolNames = append(lastToolNames, tc.Name)
+
+				// Guard check
+				if cfg.GuardMgr != nil {
+					decision, guardErr := cfg.GuardMgr.Evaluate(ctx, tc.Name, tc.Arguments)
+					if guardErr != nil {
+						eventsCh <- internal.Event{
+							Name:        "Guard",
+							Args:        []string{tc.Name},
+							Message:     fmt.Sprintf("Error: %v", guardErr),
+							PreviewType: internal.PreviewGuard,
+							IsError:     true,
+						}
+						*messages = append(*messages, llm.Message{
+							Role:       llm.RoleTool,
+							Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: fmt.Sprintf("Guard error: %v", guardErr)}},
+							ToolCallID: tc.ID,
+						})
+						continue
+					}
+					if decision != nil && decision.Verdict == guard.VerdictDeny {
+						eventsCh <- internal.Event{
+							Name:        "Guard",
+							Args:        []string{tc.Name},
+							Message:     fmt.Sprintf("Blocked: %s", decision.Reason),
+							PreviewType: internal.PreviewGuard,
+							IsError:     true,
+						}
+						*messages = append(*messages, llm.Message{
+							Role:       llm.RoleTool,
+							Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: fmt.Sprintf("Operation blocked by safety guard: %s", decision.Reason)}},
+							ToolCallID: tc.ID,
+						})
+						continue
+					}
+				}
+
 				result, err := cfg.ToolManager.ExecuteTool(tc.Name, tc.Arguments, eventsCh)
 				content := result.Content
 				if err != nil {

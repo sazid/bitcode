@@ -110,6 +110,11 @@ Examples of risky actions that warrant user confirmation:
 - Destructive operations: deleting files/branches, dropping database tables, rm -rf
 - Hard-to-reverse operations: force-pushing, git reset --hard, amending published commits
 - Actions visible to others: pushing code, creating/closing PRs or issues, sending messages
+
+# Safety Guards
+Tool calls are subject to safety guards. If a tool call is blocked, you will receive
+an error explaining why. Do not retry blocked operations. Instead, explain to the user
+what you wanted to do and suggest alternatives.
 `)
 
 	sb.WriteString("\n# Environment\n")

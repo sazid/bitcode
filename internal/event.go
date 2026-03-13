@@ -8,6 +8,7 @@ const (
 	PreviewCode     PreviewType = "code"
 	PreviewFileList PreviewType = "filelist"
 	PreviewBash     PreviewType = "bash"
+	PreviewGuard    PreviewType = "guard"
 )
 
 type Event struct {
