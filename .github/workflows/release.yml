@@ -87,11 +87,14 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           
-          # Create release
+          # Create release and upload binaries
           gh release create "v${VERSION}" \
             --title "BitCode v${VERSION}" \
             --generate-notes \
-            artifacts/*
+            artifacts/bitcode-linux-amd64 \
+            artifacts/bitcode-linux-arm64 \
+            artifacts/bitcode-darwin-amd64 \
+            artifacts/bitcode-darwin-arm64
           
           # Upload checksums
           gh release upload "v${VERSION}" artifacts/checksums.txt
