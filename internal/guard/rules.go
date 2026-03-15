@@ -159,7 +159,7 @@ func (r *DangerousCommandRule) Evaluate(ctx *EvalContext) *Decision {
 
 // --- SensitiveFileRule ---
 
-// SensitiveFileRule requires approval before modifying sensitive files.
+// SensitiveFileRule requires approval before reading or modifying sensitive files.
 type SensitiveFileRule struct{}
 
 var sensitivePatterns = []string{
@@ -174,7 +174,10 @@ var sensitivePatterns = []string{
 }
 
 func (r *SensitiveFileRule) Evaluate(ctx *EvalContext) *Decision {
-	if ctx.ToolName != "Write" && ctx.ToolName != "Edit" {
+	switch ctx.ToolName {
+	case "Read", "Write", "Edit":
+		// fall through to check
+	default:
 		return nil
 	}
 
@@ -188,19 +191,24 @@ func (r *SensitiveFileRule) Evaluate(ctx *EvalContext) *Decision {
 		return nil
 	}
 
+	action := "accessing"
+	if ctx.ToolName == "Write" || ctx.ToolName == "Edit" {
+		action = "modifying"
+	}
+
 	base := filepath.Base(path)
 	for _, pattern := range sensitivePatterns {
 		if matched, _ := filepath.Match(pattern, base); matched {
 			return &Decision{
 				Verdict: VerdictAsk,
-				Reason:  fmt.Sprintf("modifying sensitive file: %s", path),
+				Reason:  fmt.Sprintf("%s sensitive file: %s", action, path),
 			}
 		}
 		// Also check against the full path for patterns like ".ssh/*"
 		if matched, _ := filepath.Match(pattern, path); matched {
 			return &Decision{
 				Verdict: VerdictAsk,
-				Reason:  fmt.Sprintf("modifying sensitive file: %s", path),
+				Reason:  fmt.Sprintf("%s sensitive file: %s", action, path),
 			}
 		}
 	}

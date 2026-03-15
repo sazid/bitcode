@@ -196,8 +196,8 @@ func TestSensitiveFileRule_ReadTool(t *testing.T) {
 		WorkingDir: "/home/user/project",
 	}
 	d := rule.Evaluate(ctx)
-	if d != nil {
-		t.Errorf("expected nil for Read tool (not Write/Edit), got %v", d)
+	if d == nil || d.Verdict != VerdictAsk {
+		t.Errorf("expected Ask for reading .env file, got %v", d)
 	}
 }
 

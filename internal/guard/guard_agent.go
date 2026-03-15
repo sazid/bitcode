@@ -114,7 +114,11 @@ func (g *GuardAgent) Validate(ctx context.Context, evalCtx *EvalContext) (*Decis
 	}()
 	defer close(skillEventsCh)
 
-	sendProgress(evalCtx.EventsCh, evalCtx.ToolName, "evaluating...", false)
+	evalMsg := "evaluating..."
+	if preview := extractInputPreview(evalCtx); preview != "" {
+		evalMsg = "evaluating: " + truncate(preview, 80)
+	}
+	sendProgress(evalCtx.EventsCh, evalCtx.ToolName, evalMsg, false)
 
 	// Agent loop
 	for turn := 0; turn < g.maxTurns; turn++ {
