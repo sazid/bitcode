@@ -213,7 +213,7 @@ func printWelcomeBanner(model, reasoning string) {
 	wd, _ := os.Getwd()
 
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ "+ansi.SetHyperlink("https://github.com/sazid/bitcode")+"BitCode"+ansi.ResetHyperlink()))
+	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ "+ansi.SetHyperlink("https://github.com/sazid/bitcode")+"BitCode"+ansi.ResetHyperlink()+" [https://github.com/sazid/bitcode]"))
 	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
