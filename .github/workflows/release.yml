@@ -81,13 +81,17 @@ jobs:
           cd artifacts
           find . -type f | sort | xargs sha256sum > checksums.txt
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            artifacts/bitcode-*
-            artifacts/checksums.txt
-          generate_release_notes: true
-          draft: false
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Create release
+          gh release create "v${VERSION}" \
+            --title "BitCode v${VERSION}" \
+            --generate-notes \
+            artifacts/*
+          
+          # Upload checksums
+          gh release upload "v${VERSION}" artifacts/checksums.txt
