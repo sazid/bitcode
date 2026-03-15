@@ -157,27 +157,7 @@ func (m inputModel) View() string {
 
 	hint := hintStyle.Render("  ctrl+s submit · esc clear · ctrl+d exit")
 
-	var todoStatus string
-	if len(m.todos) > 0 {
-		completed := 0
-		var activeContent string
-		for _, t := range m.todos {
-			if t.Status == "completed" {
-				completed++
-			}
-			if t.Status == "in_progress" && activeContent == "" {
-				activeContent = t.Content
-			}
-		}
-		todoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true)
-		countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
-		count := countStyle.Render(fmt.Sprintf("[%d/%d]", completed, len(m.todos)))
-		if activeContent != "" {
-			todoStatus = fmt.Sprintf("  %s %s\n", count, todoStyle.Render("● "+activeContent))
-		} else {
-			todoStatus = fmt.Sprintf("  %s %s\n", count, todoStyle.Render("tasks pending"))
-		}
-	}
+	todoStatus := RenderTodoStatus(m.todos)
 
 	return fmt.Sprintf("\n%s%s\n%s", todoStatus, borderStyle.Render(m.textarea.View()), hint)
 }

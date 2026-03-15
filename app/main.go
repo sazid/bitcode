@@ -169,12 +169,12 @@ func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
 	return defs
 }
 
-func defaultCallbacks(guardMgr *guard.Manager) AgentCallbacks {
+func defaultCallbacks(config *AgentConfig) AgentCallbacks {
 	var spin *Spinner
 
 	// Wire interactive permission handler with spinner pause/resume
-	if guardMgr != nil {
-		guardMgr.SetPermissionHandler(guard.TerminalPermissionHandler(
+	if config.GuardMgr != nil {
+		config.GuardMgr.SetPermissionHandler(guard.TerminalPermissionHandler(
 			func() {
 				if spin != nil {
 					spin.Stop()
@@ -191,7 +191,11 @@ func defaultCallbacks(guardMgr *guard.Manager) AgentCallbacks {
 		},
 		OnThinking: func(active bool) {
 			if active {
-				spin = StartSpinner(os.Stderr)
+				var todos []tools.TodoItem
+				if config.TodoStore != nil {
+					todos = config.TodoStore.Get()
+				}
+				spin = StartSpinner(os.Stderr, todos)
 			} else if spin != nil {
 				spin.Stop()
 				spin = nil
@@ -221,7 +225,7 @@ func runSingleShot(config *AgentConfig, prompt string) {
 		cancel()
 	}()
 
-	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config.GuardMgr))
+	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
 }
 
 // runInteractive runs the interactive REPL mode.
@@ -308,7 +312,7 @@ func runInteractive(config *AgentConfig) {
 			}
 		}()
 
-		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config.GuardMgr))
+		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
 
 		signal.Stop(sigCh)
 		cancel()

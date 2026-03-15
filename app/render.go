@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/tools"
 )
 
 var spinnerMessages = []string{
@@ -48,7 +49,7 @@ type Spinner struct {
 	done chan struct{}
 }
 
-func StartSpinner(w io.Writer) *Spinner {
+func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 	s := &Spinner{w: w, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(s.done)
@@ -58,6 +59,12 @@ func StartSpinner(w io.Writer) *Spinner {
 		defer ticker.Stop()
 		i := 0
 		nextSwap := 40 + rand.Intn(30) // swap message every ~3-5s
+
+		// Print todo status once at the start
+		if ts := RenderTodoStatus(todos); ts != "" {
+			fmt.Fprintf(w, "%s", ts)
+		}
+
 		for {
 			select {
 			case <-s.stop:
