@@ -49,9 +49,9 @@ jobs:
           if [ "$GOOS" = "windows" ]; then
             EXT=".exe"
           fi
-          
+
           OUTPUT_NAME="bitcode-${VERSION}-${GOOS}-${GOARCH}${EXT}"
-          
+
           go build -ldflags="-s -w -X github.com/sazid/bitcode/internal/version.Version=${{ steps.version.outputs.version }} -X github.com/sazid/bitcode/internal/version.Commit=${{ steps.version.outputs.commit }} -X github.com/sazid/bitcode/internal/version.Date=${{ steps.version.outputs.date }} -X github.com/sazid/bitcode/internal/version.BuildType=release" \
             -o "$OUTPUT_NAME" ./app
 
@@ -86,15 +86,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          
+
           # Create release and upload binaries
           gh release create "v${VERSION}" \
             --title "BitCode v${VERSION}" \
             --generate-notes \
-            artifacts/bitcode-linux-amd64 \
-            artifacts/bitcode-linux-arm64 \
-            artifacts/bitcode-darwin-amd64 \
-            artifacts/bitcode-darwin-arm64
-          
-          # Upload checksums
-          gh release upload "v${VERSION}" artifacts/checksums.txt
+            artifacts/bitcode-${VERSION}-* \
+            artifacts/checksums.txt
