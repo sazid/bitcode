@@ -268,6 +268,33 @@ func runInteractive(config *AgentConfig) {
 			case "/help":
 				printHelp(config.SkillManager)
 				continue
+			case "/reasoning":
+				validEfforts := []string{"none", "low", "medium", "high", "xhigh"}
+				args := strings.ToLower(cmdArgs)
+				if args == "" || args == "default" || args == "clear" {
+					config.Reasoning = ""
+					fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Reasoning effort reset to default"))
+					printWelcomeBanner(config.Model, config.Reasoning)
+					continue
+				}
+				valid := false
+				for _, e := range validEfforts {
+					if args == e {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					fmt.Fprintln(os.Stderr, errorStyle.Render(
+						fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs),
+					))
+					fmt.Fprintln(os.Stderr, dimStyle.Render("  Valid options: none, low, medium, high, xhigh, default"))
+					continue
+				}
+				config.Reasoning = args
+				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Reasoning effort set to "+config.Reasoning))
+				printWelcomeBanner(config.Model, config.Reasoning)
+				continue
 			default:
 				// Check if it's a skill
 				skillName := strings.TrimPrefix(cmdName, "/")
