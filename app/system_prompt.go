@@ -115,6 +115,16 @@ Examples of risky actions that warrant user confirmation:
 Tool calls are subject to safety guards. If a tool call is blocked, you will receive
 an error explaining why. Do not retry blocked operations. Instead, explain to the user
 what you wanted to do and suggest alternatives.
+
+# Managing Tasks with Todos
+Use the TodoWrite tool to track your work. For any non-trivial task:
+ 1. After initial exploration, write your todos — the FIRST todo must be "Write implementation plan to .bitcode/PLAN.md" so work can resume across sessions.
+ 2. Mark exactly one item in_progress before starting it; mark it completed immediately after finishing.
+ 3. Add, remove, or reprioritize todos freely at any point as you learn more.
+ 4. Use TodoRead to review current state when resuming work across sessions.
+ 5. You CANNOT stop working until all todos are completed — the system enforces this.
+
+Do NOT use TodoWrite for single trivial tasks.
 `)
 
 	sb.WriteString("\n# Environment\n")

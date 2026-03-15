@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sazid/bitcode/internal/skills"
+	"github.com/sazid/bitcode/internal/tools"
 )
 
 // InputResult represents the result of reading user input.
@@ -40,12 +41,13 @@ var inputKeys = inputKeyMap{
 // inputModel is the bubbletea model for the input prompt.
 type inputModel struct {
 	textarea  textarea.Model
+	todos     []tools.TodoItem
 	submitted bool
 	quit      bool
 	err       error
 }
 
-func newInputModel() inputModel {
+func newInputModel(todos []tools.TodoItem) inputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask anything... (Enter for newline, Ctrl+S to submit)"
 	ta.Prompt = ""
@@ -64,6 +66,7 @@ func newInputModel() inputModel {
 
 	return inputModel{
 		textarea: ta,
+		todos:    todos,
 	}
 }
 
@@ -154,12 +157,34 @@ func (m inputModel) View() string {
 
 	hint := hintStyle.Render("  ctrl+s submit · esc clear · ctrl+d exit")
 
-	return fmt.Sprintf("\n%s\n%s", borderStyle.Render(m.textarea.View()), hint)
+	var todoStatus string
+	if len(m.todos) > 0 {
+		completed := 0
+		var activeContent string
+		for _, t := range m.todos {
+			if t.Status == "completed" {
+				completed++
+			}
+			if t.Status == "in_progress" && activeContent == "" {
+				activeContent = t.Content
+			}
+		}
+		todoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true)
+		countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
+		count := countStyle.Render(fmt.Sprintf("[%d/%d]", completed, len(m.todos)))
+		if activeContent != "" {
+			todoStatus = fmt.Sprintf("  %s %s\n", count, todoStyle.Render("● "+activeContent))
+		} else {
+			todoStatus = fmt.Sprintf("  %s %s\n", count, todoStyle.Render("tasks pending"))
+		}
+	}
+
+	return fmt.Sprintf("\n%s%s\n%s", todoStatus, borderStyle.Render(m.textarea.View()), hint)
 }
 
 // readInput launches a bubbletea program to collect user input.
-func readInput() InputResult {
-	model := newInputModel()
+func readInput(store tools.TodoStore) InputResult {
+	model := newInputModel(store.Get())
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 	finalModel, err := p.Run()

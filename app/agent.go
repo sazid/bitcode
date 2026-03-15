@@ -23,6 +23,7 @@ type AgentConfig struct {
 	SkillManager *skills.Manager
 	ReminderMgr  *reminder.Manager
 	GuardMgr     *guard.Manager
+	TodoStore    tools.TodoStore
 }
 
 type AgentCallbacks struct {
@@ -161,6 +162,16 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 			}
 
 		case llm.FinishStop:
+			if cfg.TodoStore != nil && cfg.TodoStore.HasIncomplete() {
+				*messages = append(*messages, llm.Message{
+					Role: llm.RoleUser,
+					Content: []llm.ContentBlock{{
+						Type: llm.ContentText,
+						Text: "<system-reminder>You have incomplete todos. You must complete all todos before stopping. Use TodoRead to check your current todos and continue working.</system-reminder>",
+					}},
+				})
+				continue
+			}
 			return
 		default:
 			return

@@ -52,6 +52,10 @@ func main() {
 	toolManager.Register(&tools.BashTool{})
 	toolManager.Register(&tools.WebSearchTool{})
 
+	todoStore := tools.NewTodoStore()
+	toolManager.Register(&tools.TodoReadTool{Store: todoStore})
+	toolManager.Register(&tools.TodoWriteTool{Store: todoStore})
+
 	skillManager := skills.DefaultManager()
 	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
 
@@ -136,6 +140,7 @@ func main() {
 		SkillManager: skillManager,
 		ReminderMgr:  reminderMgr,
 		GuardMgr:     guardMgr,
+		TodoStore:    todoStore,
 	}
 
 	if prompt != "" {
@@ -231,7 +236,7 @@ func runInteractive(config *AgentConfig) {
 	messages, toolDefs := newConversation(config)
 
 	for {
-		result := readInput()
+		result := readInput(config.TodoStore)
 
 		if result.EOF {
 			fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
@@ -252,6 +257,7 @@ func runInteractive(config *AgentConfig) {
 				fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
 				return
 			case "/new":
+				config.TodoStore.Clear()
 				messages, toolDefs = newConversation(config)
 				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Started new conversation"))
 				continue
