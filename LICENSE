@@ -1,0 +1,29 @@
+BitCode Custom License
+Copyright (c) 2026 Sazid (https://github.com/sazid)
+
+Permission is hereby granted to any person obtaining a copy of this
+software and associated documentation files (the "Software") to use,
+copy, modify, and distribute the Software, free of charge, for any
+purpose, subject to the following conditions:
+
+1. ATTRIBUTION
+   All copies, modifications, forks, distributions, or public uses of
+   the Software — including derivative works — must:
+   a) Retain this copyright notice in full.
+   b) Visibly credit the original author in any public-facing interface,
+      documentation, or README with the following notice:
+      "Based on BitCode by Sazid (https://github.com/sazid/bitcode)"
+
+2. SHARE-ALIKE
+   Any modified or derivative version of the Software must be
+   distributed under this same license, without alteration. You may not
+   relicense the Software or any derivative work under different terms.
+
+3. NO ENDORSEMENT
+   You may not use the name "BitCode" or the author's identity to
+   endorse or promote products derived from this Software without prior
+   written permission.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM USE OF THE SOFTWARE.

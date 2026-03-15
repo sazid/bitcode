@@ -283,6 +283,157 @@ Typically you'd point this at a fast, cheap model (e.g. a small local model or a
 - If the LLM guard is enabled but the API call fails → falls back to `VerdictAsk` (prompt user)
 - If the LLM guard is not enabled → `VerdictLLM` automatically falls back to `VerdictAsk`
 
+## Guard Agent
+
+The **Guard Agent** is an expert multi-turn LLM agent designed for security-aware tool validation. It replaces the simple single-turn LLM guard with a sophisticated agent that uses domain-specific skills and structured reasoning.
+
+### Architecture
+
+```
+                         Tool Call (Name + JSON args)
+                                    │
+                                    ▼
+                         ┌──────────────────────┐
+                         │   Guard Manager       │
+                         │   Rule Chain          │
+                         └──────────┬───────────┘
+                                    │ VerdictLLM
+                                    ▼
+                         ┌──────────────────────────────────────┐
+                         │   Guard Agent                         │
+                         │   ──────────────────────────────────  │
+                         │   Expert persona system prompt        │
+                         │                                       │
+                         │   tools.Manager                       │
+                         │     └─ SkillTool ◄─ GuardSkillMgr   │◄── guard-skills/ dirs
+                         │          (embedded built-ins)        │
+                         │                                       │
+                         │   Standard tool-call agent loop:      │
+                         │     Complete() → FinishToolCalls      │
+                         │       → SkillTool.Execute()           │
+                         │       → inject skill body as result   │
+                         │     → Continue until FinishStop       │
+                         │       → parse ALLOW/DENY/ASK          │
+                         └──────────────────────────────────────┘
+```
+
+### Features
+
+1. **Expert Persona** — A senior security engineer and sysadmin with extensive cloud deployment experience (AWS, GCP, Azure, Kubernetes).
+
+2. **Multi-turn Reasoning** — Uses a standard tool-call loop (same pattern as the main agent) to reason about complex tool calls. The agent can invoke skills, analyze code, and make informed decisions.
+
+3. **Language-Specific Skills** — Automatically detects the programming language/runtime and injects relevant security context:
+   - **Bash** — Command substitution, eval, redirection attacks, pipe-to-shell
+   - **Python** — `eval()`, `exec()`, `subprocess` with `shell=True`, pickle deserialization
+   - **Go** — `exec.Command`, shell invocation, `unsafe` package, path traversal
+   - **JavaScript/TypeScript** — `eval()`, `child_process`, prototype pollution, SSRF
+
+4. **Code Simulation** — On-demand skill for step-by-step code tracing to predict execution behavior before allowing the call.
+
+### Guard Skills
+
+Guard skills work the same as the main agent's skills system but are loaded from `guard-skills/` directories:
+
+```
+~/.agents/guard-skills/       ← lowest precedence (disk)
+~/.claude/guard-skills/
+~/.bitcode/guard-skills/
+.agents/guard-skills/         ← project-level
+.claude/guard-skills/
+.bitcode/guard-skills/        ← highest precedence (disk)
+internal/guard/skills/        ← embedded built-ins (lowest of all)
+```
+
+### Built-in Guard Skills
+
+The following skills are embedded in the binary:
+
+| Skill | Language | Auto-invoke | Description |
+|-------|----------|-------------|-------------|
+| `bash.md` | `bash` | Yes | Bash security patterns and dangerous constructs |
+| `python.md` | `python` | Yes | Python security patterns (subprocess, eval, pickle) |
+| `go.md` | `go` | Yes | Go security patterns (exec.Command, unsafe) |
+| `js.md` | `js` | Yes | JS/TS security patterns (eval, child_process) |
+| `simulate.md` | — | No | Code simulation protocol (on-demand) |
+
+### Skill Frontmatter
+
+Guard skills support additional frontmatter fields:
+
+```markdown
+---
+name: Bash Security Expert
+description: Pattern library for dangerous Bash constructs
+language: bash
+auto_invoke: true
+---
+# Bash Security Patterns
+...
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `language` | string | The language this skill applies to |
+| `auto_invoke` | bool | If true, automatically inject skill body into guard context |
+
+### How Auto-Injection Works
+
+When the guard agent evaluates a tool call:
+
+1. **Language Detection** — The guard detects the language/runtime from the tool call:
+   - `Bash` tool → always `bash`
+   - `Bash` with `python`/`python3`/`uv run` → `python`
+   - `Bash` with `go run`/`go build`/`go test` → `go`
+   - `Bash` with `node`/`deno`/`bun`/`npx` → `js`
+   - File tools with `.py`/`.go`/`.js`/`.ts` extensions
+
+2. **Auto-Inject Skills** — Skills with `auto_invoke: true` matching the detected language have their bodies pre-injected into the first user message. The guard LLM sees them immediately without needing to make a tool call.
+
+3. **On-Demand Skills** — All skills are listed in the system prompt. The guard can invoke them via `SkillTool` when it needs deeper analysis.
+
+### Example Guard Agent Evaluation
+
+```
+[User message to guard]
+  Tool: Bash
+  Input: python3 -c "import subprocess; subprocess.run('rm -rf /tmp/old', shell=True)"
+  Auto-context: [python.md body pre-injected]
+
+[Assistant — FinishToolCalls]
+  {"tool": "Skill", "arguments": {"skill": "simulate"}}
+
+[Tool result]
+  # Code Simulation Protocol
+  ... (simulate.md body)
+
+[Assistant — FinishStop]
+  "Tracing the code: subprocess.run with shell=True executing 'rm -rf /tmp/old'.
+   /tmp/old is outside working directory. Shell=True with a literal string is acceptable
+   but the path is fixed (/tmp) not cwd-relative.
+   ASK: subprocess.run with shell=True deletes outside working directory"
+
+→ Decision{Verdict: VerdictAsk, Reason: "subprocess.run with shell=True deletes outside working directory"}
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BITCODE_GUARD_LLM` | `true` | Enable the Guard Agent (set to `false` to disable) |
+| `BITCODE_GUARD_MODEL` | main model | Model to use for guard agent |
+| `BITCODE_GUARD_MAX_TURNS` | `5` | Max turns for guard agent reasoning loop |
+
+### Disabling the Guard Agent
+
+To use only rule-based guards without LLM evaluation:
+
+```bash
+BITCODE_GUARD_LLM=false ./bitcode
+```
+
+This will cause all `VerdictLLM` verdicts to fall back to `VerdictAsk` (prompt user) instead of calling the Guard Agent.
+
 ## User Permission Prompt
 
 When the final verdict is `VerdictAsk`, the guard system prompts the user for approval using a minimal bubbletea program (`internal/guard/prompt.go`).
@@ -466,10 +617,22 @@ internal/guard/
   guard.go       # Core types (Verdict, Decision, EvalContext, Rule, PermissionHandler)
   manager.go     # Manager — rule chain evaluation, session caching, verdict escalation
   rules.go       # 4 built-in rules (DangerousCommand, WorkingDir, SensitiveFile, DefaultPolicy)
-  llm_guard.go   # Optional LLM-based validator (LLMGuard, LLMValidator interface)
+  llm_guard.go   # Deprecated — replaced by GuardAgent
+  guard_agent.go # GuardAgent — multi-turn LLM agent with SkillTool support
+  guard_prompt.go # BuildGuardSystemPrompt() — expert persona prompt
+  langdetect.go  # DetectLanguage() + SkillsForLanguage() helpers
   prompt.go      # Terminal permission prompt (TerminalPermissionHandler, AutoDenyHandler)
   plugins.go     # Plugin loading from guards/ directories
   guard_test.go  # Tests for rules, manager, LLM parsing, plugin parsing
+  skills/        # Embedded built-in guard skills
+    bash.md      #   Bash security patterns (auto_invoke: true)
+    python.md    #   Python security patterns (auto_invoke: true)
+    go.md        #   Go security patterns (auto_invoke: true)
+    js.md        #   JS/TS security patterns (auto_invoke: true)
+    simulate.md  #   Code simulation protocol (on-demand)
+
+internal/skills/
+  skills.go      # Skill manager with Config support (SubDir, Embedded, Metadata)
 ```
 
 Integration points in `app/`:
