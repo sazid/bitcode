@@ -2,7 +2,7 @@
 
 [![asciicast](https://asciinema.org/a/OEbplbhzYB1xU4bl.svg)](https://asciinema.org/a/OEbplbhzYB1xU4bl)
 
-An AI coding assistant built in Go that uses LLMs to understand code and perform actions through tool calls. BitCode implements an agentic loop with multiple integrated tools.
+An agentic AI coding assistant in your terminal — with interactive TUI, smart security guards, extensible skills, built-in todo tracking with planning, and full control over reasoning effort.
 
 ## Features
 
