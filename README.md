@@ -9,6 +9,13 @@ An AI coding assistant built in Go that uses LLMs to understand code and perform
 - **Interactive Mode** — Full TUI with multiline input editor, bordered prompt, and keyboard shortcuts
 - **Single-Shot Mode** — Run a single prompt from the command line with `-p`
 - **Agent Loop** — Iterative LLM conversation with automatic tool calling (up to 50 turns)
+- **Tool Guards** — Safety layer that validates tool calls before execution (rules-based, user prompts, or LLM-powered)
+- **Guard Agent** — Expert multi-turn LLM agent for security-aware tool validation with language-specific skills
+- **System Reminders** — Dynamic context injection via `<system-reminder>` tags with [plugin support](docs/system-reminders.md)
+- **Skills** — User-defined prompt templates loaded from `.agents/`, `.claude/`, or `.bitcode/` directories
+- **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
+- **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
+- **OpenRouter Integration** — Works with any OpenAI-compatible API (including local servers)
 
 ### Tools
 
@@ -22,14 +29,6 @@ An AI coding assistant built in Go that uses LLMs to understand code and perform
 | TodoRead | Read current todo list |
 | TodoWrite | Create or update todo list |
 | Skill | Invoke user-defined prompt templates |
-
-- **Tool Guards** — Safety layer that validates tool calls before execution (rules-based, user prompts, or LLM-powered)
-- **Guard Agent** — Expert multi-turn LLM agent for security-aware tool validation with language-specific skills
-- **System Reminders** — Dynamic context injection via `<system-reminder>` tags with [plugin support](docs/system-reminders.md)
-- **Skills** — User-defined prompt templates loaded from `.agents/`, `.claude/`, or `.bitcode/` directories
-- **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
-- **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
-- **OpenRouter Integration** — Works with any OpenAI-compatible API (including local servers)
 
 ## Requirements
 
