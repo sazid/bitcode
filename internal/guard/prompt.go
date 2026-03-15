@@ -127,7 +127,7 @@ func (m permModel) View() string {
 	}
 
 	if m.state == permStateFeedback {
-		fmt.Fprintf(&sb, "\n  Tell the agent what to do:\n  > %s\n", m.feedback.View())
+		fmt.Fprintf(&sb, "\n  Tell the agent what to do:\n  %s\n", m.feedback.View())
 		fmt.Fprintf(&sb, "  \033[2mEnter to submit · Esc to cancel\033[0m\n")
 	} else {
 		fmt.Fprintf(&sb, "\n  [\033[32my\033[0m] Allow once  [\033[32ma\033[0m] Always allow  [\033[31mn\033[0m] Deny  [\033[34mt\033[0m] Tell what to do\n")
