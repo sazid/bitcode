@@ -17,6 +17,7 @@ import (
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
+	"github.com/sazid/bitcode/internal/version"
 )
 
 func main() {
@@ -24,9 +25,16 @@ func main() {
 
 	var prompt string
 	var reasoningEffort string
+	var showVersion bool
 	flag.StringVar(&prompt, "p", "", "Prompt to send to LLM (omit for interactive mode)")
 	flag.StringVar(&reasoningEffort, "reasoning", "", "Reasoning effort: low, medium, high (omit to let the model decide)")
+	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Fprintf(os.Stderr, "BitCode %s\n", version.String())
+		os.Exit(0)
+	}
 
 	apiKey := os.Getenv("OPENROUTER_API_KEY")
 	baseUrl := os.Getenv("OPENROUTER_BASE_URL")

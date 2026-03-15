@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
+	"github.com/sazid/bitcode/internal/version"
 )
 
 // InputResult represents the result of reading user input.
@@ -216,6 +217,9 @@ func printWelcomeBanner(model, reasoning string) {
 	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ "+ansi.SetHyperlink("https://github.com/sazid/bitcode")+"BitCode"+ansi.ResetHyperlink()+" [https://github.com/sazid/bitcode]"))
 	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
 	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, infoStyle.Render(
+		labelStyle.Render("Version:   ")+version.String(),
+	))
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
 		labelStyle.Render("Model:     ")+model,
 	))

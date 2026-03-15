@@ -1,0 +1,92 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then
+            EXT=".exe"
+          fi
+          
+          OUTPUT_NAME="bitcode-${VERSION}-${GOOS}-${GOARCH}${EXT}"
+          
+          go build -ldflags="-s -w -X github.com/sazid/bitcode/internal/version.Version=${{ steps.version.outputs.version }} -X github.com/sazid/bitcode/internal/version.Commit=${{ steps.version.outputs.commit }} -X github.com/sazid/bitcode/internal/version.Date=${{ steps.version.outputs.date }} -X github.com/sazid/bitcode/internal/version.BuildType=release" \
+            -o "$OUTPUT_NAME" ./app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitcode-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bitcode-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          find . -type f | sort | xargs sha256sum > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/bitcode-*
+            artifacts/checksums.txt
+          generate_release_notes: true
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
