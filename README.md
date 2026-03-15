@@ -1,5 +1,21 @@
 # BitCode
 
+<div align="center">
+
+**[Download latest release](https://github.com/sazid/bitcode/releases/latest)** — Linux and macOS (amd64 / arm64) · Windows: use WSL or a VM
+
+</div>
+
+```sh
+VERSION=$(curl -fsSL https://api.github.com/repos/sazid/bitcode/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+curl -fsSL "https://github.com/sazid/bitcode/releases/download/v${VERSION}/bitcode-${VERSION}-${OS}-${ARCH}" -o bitcode
+chmod +x bitcode
+```
+
+---
+
 [![asciicast](https://asciinema.org/a/OEbplbhzYB1xU4bl.svg)](https://asciinema.org/a/OEbplbhzYB1xU4bl)
 
 An agentic AI coding assistant in your terminal — with interactive TUI, smart security guards, extensible skills, built-in todo tracking with planning, and full control over reasoning effort.
