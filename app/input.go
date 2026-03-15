@@ -260,6 +260,7 @@ func printHelp(skillMgr *skills.Manager) {
 	fmt.Fprintln(os.Stderr, headerStyle.Render("  Commands"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/new"), descStyle.Render("Start a new conversation"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/reasoning"), descStyle.Render("Set reasoning effort (none/low/medium/high/xhigh)"))
+	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/turns"), descStyle.Render("Get or set max agent turns (e.g. /turns 100)"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/help"), descStyle.Render("Show this help message"))
 	fmt.Fprintf(os.Stderr, "  %s %s\n", cmdStyle.Render("/exit"), descStyle.Render("Exit BitCode"))
 

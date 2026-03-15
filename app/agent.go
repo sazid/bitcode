@@ -13,12 +13,13 @@ import (
 	"github.com/sazid/bitcode/internal/tools"
 )
 
-const maxAgentTurns = 50
+const defaultMaxAgentTurns = 200
 
 type AgentConfig struct {
 	Provider     llm.Provider
 	Model        string
 	Reasoning    string
+	MaxTurns     int
 	ToolManager  *tools.Manager
 	SkillManager *skills.Manager
 	ReminderMgr  *reminder.Manager
@@ -49,7 +50,11 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 	startTime := time.Now()
 	var lastToolNames []string
 
-	for turn := 0; turn < maxAgentTurns; turn++ {
+	maxTurns := cfg.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = defaultMaxAgentTurns
+	}
+	for turn := 0; turn < maxTurns; turn++ {
 		if ctx.Err() != nil {
 			return
 		}
@@ -197,6 +202,6 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 	eventsCh <- internal.Event{
 		Name:    "System",
-		Message: fmt.Sprintf("Max turn (%d) limit reached.", maxAgentTurns),
+		Message: fmt.Sprintf("Max turn (%d) limit reached.", maxTurns),
 	}
 }

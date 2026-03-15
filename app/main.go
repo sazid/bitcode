@@ -26,9 +26,11 @@ func main() {
 	var prompt string
 	var reasoningEffort string
 	var showVersion bool
+	var maxTurns int
 	flag.StringVar(&prompt, "p", "", "Prompt to send to LLM (omit for interactive mode)")
 	flag.StringVar(&reasoningEffort, "reasoning", "", "Reasoning effort: low, medium, high (omit to let the model decide)")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
+	flag.IntVar(&maxTurns, "max-turns", defaultMaxAgentTurns, "Maximum number of agent turns per conversation")
 	flag.Parse()
 
 	if showVersion {
@@ -144,6 +146,7 @@ func main() {
 		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
 		Model:        model,
 		Reasoning:    reasoningEffort,
+		MaxTurns:     maxTurns,
 		ToolManager:  toolManager,
 		SkillManager: skillManager,
 		ReminderMgr:  reminderMgr,
@@ -275,6 +278,19 @@ func runInteractive(config *AgentConfig) {
 				continue
 			case "/help":
 				printHelp(config.SkillManager)
+				continue
+			case "/turns":
+				if cmdArgs == "" {
+					fmt.Fprintln(os.Stderr, dimStyle.Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns)))
+					continue
+				}
+				var n int
+				if _, err := fmt.Sscan(cmdArgs, &n); err != nil || n <= 0 {
+					fmt.Fprintln(os.Stderr, errorStyle.Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs)))
+					continue
+				}
+				config.MaxTurns = n
+				fmt.Fprintln(os.Stderr, successStyle.Render(fmt.Sprintf("\n  ✓ Max turns set to %d", config.MaxTurns)))
 				continue
 			case "/reasoning":
 				validEfforts := []string{"none", "low", "medium", "high", "xhigh"}
