@@ -104,15 +104,16 @@ func (m *Manager) Evaluate(ctx context.Context, toolName, input string, eventsCh
 		fallthrough
 
 	case VerdictAsk:
-		return m.handleAsk(toolName, decision)
+		return m.handleAsk(evalCtx, decision)
 	}
 
 	return decision, nil
 }
 
 // handleAsk checks the session cache and prompts the user if needed.
-func (m *Manager) handleAsk(toolName string, decision *Decision) (*Decision, error) {
-	cacheKey := fmt.Sprintf("%s:%s", toolName, decision.Reason)
+func (m *Manager) handleAsk(evalCtx *EvalContext, decision *Decision) (*Decision, error) {
+	decision.Command = extractInputPreview(evalCtx)
+	cacheKey := fmt.Sprintf("%s:%s", evalCtx.ToolName, decision.Reason)
 
 	m.mu.RLock()
 	approved := m.sessionApproved[cacheKey]
@@ -127,13 +128,35 @@ func (m *Manager) handleAsk(toolName string, decision *Decision) (*Decision, err
 		return &Decision{Verdict: VerdictDeny, Reason: decision.Reason + " (auto-denied, non-interactive)"}, nil
 	}
 
-	if m.permHandler(toolName, *decision) {
-		// User approved — cache for session
-		m.mu.Lock()
-		m.sessionApproved[cacheKey] = true
-		m.mu.Unlock()
+	result := m.permHandler(evalCtx.ToolName, *decision)
+
+	if result.Feedback != "" {
+		return &Decision{Verdict: VerdictDeny, Reason: decision.Reason, Feedback: result.Feedback}, nil
+	}
+
+	if result.Approved {
+		if result.Cache {
+			m.mu.Lock()
+			m.sessionApproved[cacheKey] = true
+			m.mu.Unlock()
+		}
 		return &Decision{Verdict: VerdictAllow, Reason: "user approved"}, nil
 	}
 
 	return &Decision{Verdict: VerdictDeny, Reason: decision.Reason + " (user denied)"}, nil
+}
+
+// extractInputPreview returns a short human-readable preview of the tool input.
+func extractInputPreview(evalCtx *EvalContext) string {
+	var m map[string]any
+	if err := json.Unmarshal(evalCtx.Input, &m); err != nil {
+		return truncate(string(evalCtx.Input), 200)
+	}
+	if cmd, ok := m["command"].(string); ok {
+		return cmd
+	}
+	if path, ok := m["file_path"].(string); ok {
+		return path
+	}
+	return truncate(string(evalCtx.Input), 200)
 }

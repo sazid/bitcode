@@ -128,18 +128,32 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 						continue
 					}
 					if decision != nil && decision.Verdict == guard.VerdictDeny {
-						eventsCh <- internal.Event{
-							Name:        "Guard",
-							Args:        []string{tc.Name},
-							Message:     fmt.Sprintf("Blocked: %s", decision.Reason),
-							PreviewType: internal.PreviewGuard,
-							IsError:     true,
+						if decision.Feedback != "" {
+							eventsCh <- internal.Event{
+								Name:        "Guard",
+								Args:        []string{tc.Name},
+								Message:     fmt.Sprintf("User redirected: %s", decision.Feedback),
+								PreviewType: internal.PreviewGuard,
+							}
+							*messages = append(*messages, llm.Message{
+								Role:       llm.RoleTool,
+								Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: fmt.Sprintf("User chose not to run this tool and provided instructions instead: %s", decision.Feedback)}},
+								ToolCallID: tc.ID,
+							})
+						} else {
+							eventsCh <- internal.Event{
+								Name:        "Guard",
+								Args:        []string{tc.Name},
+								Message:     fmt.Sprintf("Blocked: %s", decision.Reason),
+								PreviewType: internal.PreviewGuard,
+								IsError:     true,
+							}
+							*messages = append(*messages, llm.Message{
+								Role:       llm.RoleTool,
+								Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: fmt.Sprintf("Operation blocked by safety guard: %s", decision.Reason)}},
+								ToolCallID: tc.ID,
+							})
 						}
-						*messages = append(*messages, llm.Message{
-							Role:       llm.RoleTool,
-							Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: fmt.Sprintf("Operation blocked by safety guard: %s", decision.Reason)}},
-							ToolCallID: tc.ID,
-						})
 						continue
 					}
 				}

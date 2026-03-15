@@ -18,8 +18,10 @@ const (
 
 // Decision contains a verdict and a human-readable reason.
 type Decision struct {
-	Verdict Verdict
-	Reason  string
+	Verdict  Verdict
+	Reason   string
+	Command  string // short preview of the tool input (populated by manager for the UI)
+	Feedback string // user instructions returned when they choose "tell what to do"
 }
 
 // EvalContext provides the context needed to evaluate a tool call.
@@ -36,6 +38,13 @@ type Rule interface {
 	Evaluate(ctx *EvalContext) *Decision
 }
 
+// PermissionResult is the outcome returned by a PermissionHandler.
+type PermissionResult struct {
+	Approved bool
+	Cache    bool   // if true, cache the approval for the rest of the session (Always allow)
+	Feedback string // non-empty when the user chose "tell what to do"
+}
+
 // PermissionHandler is called when a guard verdict is Ask.
-// It blocks until the user responds. Returns true if approved.
-type PermissionHandler func(toolName string, decision Decision) bool
+// It blocks until the user responds.
+type PermissionHandler func(toolName string, decision Decision) PermissionResult

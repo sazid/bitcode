@@ -295,8 +295,8 @@ func TestManager_AskWithNoHandler_AutoDeny(t *testing.T) {
 func TestManager_AskWithHandler_Approved(t *testing.T) {
 	mgr := NewManager()
 	mgr.AddRule(&DangerousCommandRule{})
-	mgr.SetPermissionHandler(func(_ string, _ Decision) bool {
-		return true // always approve
+	mgr.SetPermissionHandler(func(_ string, _ Decision) PermissionResult {
+		return PermissionResult{Approved: true, Cache: true}
 	})
 
 	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"), nil)
@@ -312,9 +312,9 @@ func TestManager_SessionCache(t *testing.T) {
 	callCount := 0
 	mgr := NewManager()
 	mgr.AddRule(&DangerousCommandRule{})
-	mgr.SetPermissionHandler(func(_ string, _ Decision) bool {
+	mgr.SetPermissionHandler(func(_ string, _ Decision) PermissionResult {
 		callCount++
-		return true
+		return PermissionResult{Approved: true, Cache: true}
 	})
 
 	// First call — should prompt
