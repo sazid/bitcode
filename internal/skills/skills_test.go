@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
 func TestParseFrontmatter(t *testing.T) {
@@ -11,14 +12,14 @@ func TestParseFrontmatter(t *testing.T) {
 		content := "---\nname: deploy\ndescription: Deploy the app\ntrigger: When the user asks to deploy\n---\nDo the deployment."
 		fm, body := parseFrontmatter(content)
 
-		if fm.Name != "deploy" {
-			t.Errorf("expected name 'deploy', got %q", fm.Name)
+		if fm["name"] != "deploy" {
+			t.Errorf("expected name 'deploy', got %q", fm["name"])
 		}
-		if fm.Description != "Deploy the app" {
-			t.Errorf("expected description 'Deploy the app', got %q", fm.Description)
+		if fm["description"] != "Deploy the app" {
+			t.Errorf("expected description 'Deploy the app', got %q", fm["description"])
 		}
-		if fm.Trigger != "When the user asks to deploy" {
-			t.Errorf("expected trigger, got %q", fm.Trigger)
+		if fm["trigger"] != "When the user asks to deploy" {
+			t.Errorf("expected trigger, got %q", fm["trigger"])
 		}
 		if body != "Do the deployment." {
 			t.Errorf("expected body 'Do the deployment.', got %q", body)
@@ -29,8 +30,8 @@ func TestParseFrontmatter(t *testing.T) {
 		content := "# Simple Skill\nJust a prompt."
 		fm, body := parseFrontmatter(content)
 
-		if fm.Name != "" || fm.Description != "" || fm.Trigger != "" {
-			t.Errorf("expected zero-value frontmatter, got %+v", fm)
+		if fm != nil {
+			t.Errorf("expected nil frontmatter, got %+v", fm)
 		}
 		if body != content {
 			t.Errorf("expected original content, got %q", body)
@@ -41,8 +42,8 @@ func TestParseFrontmatter(t *testing.T) {
 		content := "---\n: invalid: yaml: [broken\n---\nBody here."
 		fm, body := parseFrontmatter(content)
 
-		if fm.Name != "" {
-			t.Errorf("expected zero-value frontmatter on malformed YAML, got %+v", fm)
+		if fm != nil {
+			t.Errorf("expected nil frontmatter on malformed YAML, got %+v", fm)
 		}
 		if body != content {
 			t.Errorf("expected original content on malformed YAML, got %q", body)
@@ -53,8 +54,8 @@ func TestParseFrontmatter(t *testing.T) {
 		content := "---\nname: test\nThis is not closed."
 		fm, body := parseFrontmatter(content)
 
-		if fm.Name != "" {
-			t.Errorf("expected zero-value frontmatter, got %+v", fm)
+		if fm != nil {
+			t.Errorf("expected nil frontmatter, got %+v", fm)
 		}
 		if body != content {
 			t.Errorf("expected original content, got %q", body)
@@ -65,14 +66,26 @@ func TestParseFrontmatter(t *testing.T) {
 		content := "---\ndescription: Only a description\n---\nBody."
 		fm, body := parseFrontmatter(content)
 
-		if fm.Name != "" {
-			t.Errorf("expected empty name, got %q", fm.Name)
+		if fm["name"] != nil {
+			t.Errorf("expected empty name, got %q", fm["name"])
 		}
-		if fm.Description != "Only a description" {
-			t.Errorf("expected 'Only a description', got %q", fm.Description)
+		if fm["description"] != "Only a description" {
+			t.Errorf("expected 'Only a description', got %q", fm["description"])
 		}
 		if body != "Body." {
 			t.Errorf("expected 'Body.', got %q", body)
+		}
+	})
+
+	t.Run("extra metadata fields", func(t *testing.T) {
+		content := "---\nname: bash-guard\nlanguage: bash\nauto_invoke: true\n---\nBody."
+		fm, _ := parseFrontmatter(content)
+
+		if fm["language"] != "bash" {
+			t.Errorf("expected language 'bash', got %q", fm["language"])
+		}
+		if fm["auto_invoke"] != true {
+			t.Errorf("expected auto_invoke true, got %v", fm["auto_invoke"])
 		}
 	})
 }
@@ -269,5 +282,72 @@ func TestManager_MultipleDirectoryPrecedence(t *testing.T) {
 	// Unique skill from .agents should still be present
 	if _, ok := m.Get("unique"); !ok {
 		t.Error("expected 'unique' skill from .agents")
+	}
+}
+
+func TestManager_EmbeddedFS(t *testing.T) {
+	// Embedded FS has flat paths (no subdirectory prefix) — the loader starts at ".".
+	embeddedFS := fstest.MapFS{
+		"bash.md": &fstest.MapFile{
+			Data: []byte("---\nname: Bash Security Expert\ndescription: Bash security patterns\nlanguage: bash\nauto_invoke: true\n---\n# Bash Security\nPatterns here."),
+		},
+		"simulate.md": &fstest.MapFile{
+			Data: []byte("---\nname: simulate\ndescription: Code simulation protocol\n---\nSimulate code."),
+		},
+	}
+
+	m := NewManager(Config{
+		SubDir:         "skills",
+		Embedded:       embeddedFS,
+		EmbeddedSource: "builtin",
+	})
+
+	bash, ok := m.Get("Bash Security Expert")
+	if !ok {
+		t.Fatal("expected 'Bash Security Expert' skill from embedded FS")
+	}
+	if bash.Source != "builtin" {
+		t.Errorf("expected source 'builtin', got %q", bash.Source)
+	}
+	if bash.Metadata["language"] != "bash" {
+		t.Errorf("expected language 'bash' in metadata, got %v", bash.Metadata["language"])
+	}
+	if bash.Metadata["auto_invoke"] != true {
+		t.Errorf("expected auto_invoke true in metadata, got %v", bash.Metadata["auto_invoke"])
+	}
+
+	sim, ok := m.Get("simulate")
+	if !ok {
+		t.Fatal("expected 'simulate' skill from embedded FS")
+	}
+	if sim.Description != "Code simulation protocol" {
+		t.Errorf("expected description, got %q", sim.Description)
+	}
+}
+
+func TestManager_DiskOverridesEmbedded(t *testing.T) {
+	embeddedFS := fstest.MapFS{
+		"bash.md": &fstest.MapFile{
+			Data: []byte("---\nname: bash-expert\ndescription: Embedded version\n---\nEmbedded body."),
+		},
+	}
+
+	// Create a disk override in a temp directory
+	dir := t.TempDir()
+	bitcodeDir := filepath.Join(dir, ".bitcode", "guard-skills")
+	os.MkdirAll(bitcodeDir, 0o755)
+	os.WriteFile(filepath.Join(bitcodeDir, "bash.md"), []byte("---\nname: bash-expert\ndescription: Disk version\n---\nDisk body."), 0o644)
+
+	// Use a custom Manager creation that loads embedded then the specific disk dir
+	m := &Manager{skills: make(map[string]Skill), cfg: Config{SubDir: "guard-skills"}}
+	m.loadEmbeddedDir(embeddedFS, ".", "builtin", "")
+	m.loadDirRecursive(bitcodeDir, "project", "")
+
+	s, ok := m.Get("bash-expert")
+	if !ok {
+		t.Fatal("expected 'bash-expert' skill")
+	}
+	if s.Description != "Disk version" {
+		t.Errorf("expected disk to override embedded, got %q", s.Description)
 	}
 }

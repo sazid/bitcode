@@ -52,7 +52,7 @@ func main() {
 	toolManager.Register(&tools.BashTool{})
 	toolManager.Register(&tools.WebSearchTool{})
 
-	skillManager := skills.NewManager()
+	skillManager := skills.DefaultManager()
 	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
 
 	reminderMgr := reminder.NewManager()
@@ -96,8 +96,9 @@ func main() {
 	}
 	guardMgr.AddRule(&guard.DefaultPolicyRule{})
 
-	// Optional LLM guard
-	if os.Getenv("BITCODE_GUARD_LLM") == "true" {
+	// Optional LLM guard agent (enabled by default unless explicitly disabled)
+	// To disable: set BITCODE_GUARD_LLM=false
+	if os.Getenv("BITCODE_GUARD_LLM") != "false" {
 		guardModel := os.Getenv("BITCODE_GUARD_LLM_MODEL")
 		if guardModel == "" {
 			guardModel = model
@@ -111,7 +112,14 @@ func main() {
 			guardAPIKey = apiKey
 		}
 		guardProvider := llm.NewOpenAIProvider(guardAPIKey, guardBaseURL)
-		guardMgr.SetLLMValidator(guard.NewLLMGuard(guardProvider, guardModel))
+		guardSkillMgr := guard.NewGuardSkillManager()
+
+		maxTurns := 0 // uses default (5)
+		if v := os.Getenv("BITCODE_GUARD_MAX_TURNS"); v != "" {
+			fmt.Sscan(v, &maxTurns)
+		}
+
+		guardMgr.SetLLMValidator(guard.NewGuardAgent(guardProvider, guardModel, guardSkillMgr, maxTurns))
 	}
 
 	isNonInteractive := prompt != ""
