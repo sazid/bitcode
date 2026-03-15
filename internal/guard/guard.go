@@ -1,6 +1,10 @@
 package guard
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/sazid/bitcode/internal"
+)
 
 // Verdict represents the outcome of a guard rule evaluation.
 type Verdict string
@@ -23,6 +27,7 @@ type EvalContext struct {
 	ToolName   string
 	Input      json.RawMessage
 	WorkingDir string
+	EventsCh   chan<- internal.Event // optional; used to publish guard progress to the UI
 }
 
 // Rule evaluates a tool call and returns a Decision.

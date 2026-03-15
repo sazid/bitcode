@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/sazid/bitcode/internal"
 )
 
 // LLMValidator provides optional LLM-based validation for ambiguous cases.
@@ -45,13 +47,15 @@ func (m *Manager) SetPermissionHandler(h PermissionHandler) {
 }
 
 // Evaluate runs the tool call through all rules and returns a final decision.
-func (m *Manager) Evaluate(ctx context.Context, toolName, input string) (*Decision, error) {
+// eventsCh is optional; if non-nil, guard progress events are sent to it.
+func (m *Manager) Evaluate(ctx context.Context, toolName, input string, eventsCh chan<- internal.Event) (*Decision, error) {
 	wd, _ := os.Getwd()
 
 	evalCtx := &EvalContext{
 		ToolName:   toolName,
 		Input:      json.RawMessage(input),
 		WorkingDir: wd,
+		EventsCh:   eventsCh,
 	}
 
 	// Run rules in order — first non-nil Decision wins

@@ -106,17 +106,19 @@ func (g *GuardAgent) Validate(ctx context.Context, evalCtx *EvalContext) (*Decis
 		llm.TextMessage(llm.RoleUser, userMsg),
 	}
 
-	// Buffered event channel — guard agent discards events (no UI)
-	eventsCh := make(chan internal.Event, 32)
+	// Local discard channel for SkillTool events — guard internals stay off the main UI
+	skillEventsCh := make(chan internal.Event, 32)
 	go func() {
-		for range eventsCh {
+		for range skillEventsCh {
 		}
 	}()
+	defer close(skillEventsCh)
+
+	sendProgress(evalCtx.EventsCh, evalCtx.ToolName, "evaluating...", false)
 
 	// Agent loop
 	for turn := 0; turn < g.maxTurns; turn++ {
 		if ctx.Err() != nil {
-			close(eventsCh)
 			return &Decision{Verdict: VerdictAsk, Reason: "guard evaluation cancelled"}, nil
 		}
 
@@ -126,16 +128,19 @@ func (g *GuardAgent) Validate(ctx context.Context, evalCtx *EvalContext) (*Decis
 			Tools:    toolDefs,
 		}, nil)
 		if err != nil {
-			close(eventsCh)
 			return nil, fmt.Errorf("guard agent completion failed: %w", err)
 		}
 
 		messages = append(messages, resp.Message)
 
+		if text := strings.TrimSpace(resp.Message.Text()); text != "" {
+			sendProgress(evalCtx.EventsCh, evalCtx.ToolName, briefLine(text), false)
+		}
+
 		switch resp.FinishReason {
 		case llm.FinishToolCalls:
 			for _, tc := range resp.Message.ToolCalls {
-				result, execErr := toolMgr.ExecuteTool(tc.Name, tc.Arguments, eventsCh)
+				result, execErr := toolMgr.ExecuteTool(tc.Name, tc.Arguments, skillEventsCh)
 				content := result.Content
 				if execErr != nil {
 					content = fmt.Sprintf("Error: %v", execErr)
@@ -148,18 +153,46 @@ func (g *GuardAgent) Validate(ctx context.Context, evalCtx *EvalContext) (*Decis
 			}
 
 		case llm.FinishStop:
-			close(eventsCh)
 			text := strings.TrimSpace(resp.Message.Text())
 			return parseLLMResponse(text), nil
 
 		default:
-			close(eventsCh)
 			return &Decision{Verdict: VerdictAsk, Reason: "guard agent ended unexpectedly"}, nil
 		}
 	}
 
-	close(eventsCh)
 	return &Decision{Verdict: VerdictAsk, Reason: fmt.Sprintf("guard agent max turns (%d) exceeded", g.maxTurns)}, nil
+}
+
+// sendProgress emits a guard progress event if ch is non-nil; non-blocking.
+func sendProgress(ch chan<- internal.Event, toolName, msg string, isError bool) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- internal.Event{
+		Name:        "Guard",
+		Args:        []string{toolName},
+		Message:     msg,
+		PreviewType: internal.PreviewGuard,
+		IsError:     isError,
+	}:
+	default:
+	}
+}
+
+// briefLine returns the first non-empty line of text, truncated to 100 chars.
+func briefLine(text string) string {
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			if len(line) > 100 {
+				return line[:100] + "..."
+			}
+			return line
+		}
+	}
+	return text
 }
 
 // buildInitialMessage constructs the first user message for the guard agent.

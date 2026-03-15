@@ -256,7 +256,7 @@ func TestDefaultPolicyRule_UnknownBash(t *testing.T) {
 
 func TestManager_NoRules_AllowByDefault(t *testing.T) {
 	mgr := NewManager()
-	d, err := mgr.Evaluate(context.Background(), "Read", fileInput("/some/file"))
+	d, err := mgr.Evaluate(context.Background(), "Read", fileInput("/some/file"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestManager_DenyPropagates(t *testing.T) {
 	mgr := NewManager()
 	mgr.AddRule(&DangerousCommandRule{})
 
-	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("rm -rf /"))
+	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("rm -rf /"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestManager_AskWithNoHandler_AutoDeny(t *testing.T) {
 	mgr.AddRule(&DangerousCommandRule{})
 	// No permission handler set — should auto-deny
 
-	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"))
+	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestManager_AskWithHandler_Approved(t *testing.T) {
 		return true // always approve
 	})
 
-	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"))
+	d, err := mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,13 +318,13 @@ func TestManager_SessionCache(t *testing.T) {
 	})
 
 	// First call — should prompt
-	mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"))
+	mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"), nil)
 	if callCount != 1 {
 		t.Errorf("expected 1 prompt call, got %d", callCount)
 	}
 
 	// Second call with same tool+reason — should use cache
-	mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"))
+	mgr.Evaluate(context.Background(), "Bash", bashInput("sudo apt install foo"), nil)
 	if callCount != 1 {
 		t.Errorf("expected still 1 prompt call (cached), got %d", callCount)
 	}

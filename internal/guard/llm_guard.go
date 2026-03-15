@@ -52,28 +52,27 @@ Consider: working directory boundaries, system damage risk, data exfiltration, c
 }
 
 func parseLLMResponse(text string) *Decision {
-	line := strings.TrimSpace(text)
-	// Take only the first line
-	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-		line = strings.TrimSpace(line[:idx])
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	// Scan from the last line backward — the verdict is typically the final line.
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		upper := strings.ToUpper(line)
+		if upper == "ALLOW" {
+			return &Decision{Verdict: VerdictAllow, Reason: "LLM guard approved"}
+		}
+		if strings.HasPrefix(upper, "DENY:") {
+			return &Decision{Verdict: VerdictDeny, Reason: strings.TrimSpace(line[5:])}
+		}
+		if strings.HasPrefix(upper, "ASK:") {
+			return &Decision{Verdict: VerdictAsk, Reason: strings.TrimSpace(line[4:])}
+		}
 	}
-
-	upper := strings.ToUpper(line)
-
-	if upper == "ALLOW" {
-		return &Decision{Verdict: VerdictAllow, Reason: "LLM guard approved"}
-	}
-	if strings.HasPrefix(upper, "DENY:") {
-		reason := strings.TrimSpace(line[5:])
-		return &Decision{Verdict: VerdictDeny, Reason: reason}
-	}
-	if strings.HasPrefix(upper, "ASK:") {
-		reason := strings.TrimSpace(line[4:])
-		return &Decision{Verdict: VerdictAsk, Reason: reason}
-	}
-
-	// Unparseable response — ask to be safe
-	return &Decision{Verdict: VerdictAsk, Reason: fmt.Sprintf("LLM guard returned ambiguous response: %s", truncate(line, 80))}
+	// Unparseable — ask to be safe
+	first := strings.TrimSpace(lines[0])
+	return &Decision{Verdict: VerdictAsk, Reason: fmt.Sprintf("LLM guard returned ambiguous response: %s", truncate(first, 80))}
 }
 
 func truncateBytes(b []byte, n int) string {

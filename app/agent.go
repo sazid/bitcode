@@ -111,7 +111,7 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 				// Guard check
 				if cfg.GuardMgr != nil {
-					decision, guardErr := cfg.GuardMgr.Evaluate(ctx, tc.Name, tc.Arguments)
+					decision, guardErr := cfg.GuardMgr.Evaluate(ctx, tc.Name, tc.Arguments, eventsCh)
 					if guardErr != nil {
 						eventsCh <- internal.Event{
 							Name:        "Guard",
@@ -174,6 +174,9 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 			}
 			return
 		default:
+			if cb.OnError != nil {
+				cb.OnError(fmt.Errorf("unexpected finish reason: %s", resp.FinishReason))
+			}
 			return
 		}
 	}
