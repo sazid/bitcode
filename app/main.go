@@ -257,8 +257,25 @@ func runInteractive(config *AgentConfig) {
 
 	messages, toolDefs := newConversation(config)
 
+	// Build slash command list for autocomplete
+	slashCommands := []SlashCommand{
+		{Name: "new", Description: "Start a new conversation", Source: "builtin"},
+		{Name: "reasoning", Description: "Set reasoning effort (none/low/medium/high/xhigh)", Source: "builtin"},
+		{Name: "turns", Description: "Get or set max agent turns", Source: "builtin"},
+		{Name: "help", Description: "Show available commands", Source: "builtin"},
+		{Name: "exit", Description: "Exit BitCode", Source: "builtin"},
+		{Name: "quit", Description: "Exit BitCode", Source: "builtin"},
+	}
+	for _, s := range config.SkillManager.List() {
+		slashCommands = append(slashCommands, SlashCommand{
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+		})
+	}
+
 	for {
-		result := readInput(config.TodoStore)
+		result := readInput(config.TodoStore, slashCommands)
 
 		if result.EOF {
 			fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))

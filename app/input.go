@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -14,6 +15,13 @@ import (
 	"github.com/sazid/bitcode/internal/tools"
 	"github.com/sazid/bitcode/internal/version"
 )
+
+// SlashCommand represents a completable slash command or skill.
+type SlashCommand struct {
+	Name        string
+	Description string
+	Source      string // "builtin", "project", "user"
+}
 
 // InputResult represents the result of reading user input.
 type InputResult struct {
@@ -46,9 +54,15 @@ type inputModel struct {
 	submitted bool
 	quit      bool
 	err       error
+
+	// Autocomplete state
+	commands    []SlashCommand
+	suggestions []SlashCommand
+	showSuggest bool
+	suggestIdx  int
 }
 
-func newInputModel(todos []tools.TodoItem) inputModel {
+func newInputModel(todos []tools.TodoItem, commands []SlashCommand) inputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask anything... (Enter for newline, Ctrl+S to submit)"
 	ta.Prompt = ""
@@ -68,6 +82,7 @@ func newInputModel(todos []tools.TodoItem) inputModel {
 	return inputModel{
 		textarea: ta,
 		todos:    todos,
+		commands: commands,
 	}
 }
 
@@ -90,6 +105,11 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case msg.Type == tea.KeyEscape:
+			if m.showSuggest {
+				m.showSuggest = false
+				m.suggestions = nil
+				return m, nil
+			}
 			// Clear current input
 			m.textarea.Reset()
 			m.textarea.SetHeight(2)
@@ -102,8 +122,36 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.textarea.Reset()
 			m.textarea.SetHeight(2)
+			m.showSuggest = false
+			m.suggestions = nil
 			return m, nil
 		}
+
+		// Autocomplete key handling when suggestions are visible
+		if m.showSuggest && len(m.suggestions) > 0 {
+			switch msg.Type {
+			case tea.KeyUp:
+				m.suggestIdx--
+				if m.suggestIdx < 0 {
+					m.suggestIdx = len(m.suggestions) - 1
+				}
+				return m, nil
+			case tea.KeyDown:
+				m.suggestIdx++
+				if m.suggestIdx >= len(m.suggestions) {
+					m.suggestIdx = 0
+				}
+				return m, nil
+			case tea.KeyTab:
+				selected := m.suggestions[m.suggestIdx]
+				m.textarea.SetValue("/" + selected.Name)
+				m.textarea.CursorEnd()
+				m.showSuggest = false
+				m.suggestions = nil
+				return m, nil
+			}
+		}
+
 	case tea.WindowSizeMsg:
 		m.textarea.SetWidth(msg.Width - 6) // account for border + padding
 	}
@@ -120,6 +168,9 @@ func (m inputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Set exact height after content has changed.
 	m.resizeTextarea()
+
+	// Update autocomplete suggestions after textarea processes the keystroke
+	m.updateSuggestions()
 
 	return m, cmd
 }
@@ -143,6 +194,83 @@ func (m *inputModel) resizeTextarea() {
 	m.textarea.SetHeight(visLines)
 }
 
+func (m *inputModel) updateSuggestions() {
+	val := m.textarea.Value()
+
+	// Only show suggestions when input starts with "/", is single-line, and has no spaces
+	if !strings.HasPrefix(val, "/") || strings.Contains(val, "\n") || strings.Contains(val, " ") {
+		m.showSuggest = false
+		m.suggestions = nil
+		m.suggestIdx = 0
+		return
+	}
+
+	prefix := strings.ToLower(strings.TrimPrefix(val, "/"))
+
+	var filtered []SlashCommand
+	for _, cmd := range m.commands {
+		if strings.Contains(strings.ToLower(cmd.Name), prefix) {
+			filtered = append(filtered, cmd)
+		}
+	}
+
+	// Sort: prefix matches first, then alphabetical
+	sort.SliceStable(filtered, func(i, j int) bool {
+		iPrefix := strings.HasPrefix(strings.ToLower(filtered[i].Name), prefix)
+		jPrefix := strings.HasPrefix(strings.ToLower(filtered[j].Name), prefix)
+		if iPrefix != jPrefix {
+			return iPrefix
+		}
+		return filtered[i].Name < filtered[j].Name
+	})
+
+	m.suggestions = filtered
+	m.showSuggest = len(filtered) > 0
+	if m.suggestIdx >= len(filtered) {
+		m.suggestIdx = 0
+	}
+}
+
+func (m inputModel) renderSuggestions() string {
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
+	sourceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
+
+	maxShow := 8
+	count := len(m.suggestions)
+	if count > maxShow {
+		count = maxShow
+	}
+
+	var sb strings.Builder
+	for i := 0; i < count; i++ {
+		cmd := m.suggestions[i]
+
+		name := nameStyle.Render("/" + cmd.Name)
+		desc := descStyle.Render(cmd.Description)
+
+		line := fmt.Sprintf("  %s  %s", name, desc)
+		if cmd.Source != "" && cmd.Source != "builtin" {
+			line += " " + sourceStyle.Render("["+cmd.Source+"]")
+		}
+
+		if i == m.suggestIdx {
+			line = selectedStyle.Render(line)
+		}
+
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	if len(m.suggestions) > maxShow {
+		sb.WriteString(descStyle.Render(fmt.Sprintf("  ... and %d more", len(m.suggestions)-maxShow)))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
 func (m inputModel) View() string {
 	if m.submitted || m.quit {
 		return ""
@@ -160,12 +288,23 @@ func (m inputModel) View() string {
 
 	todoStatus := RenderTodoStatus(m.todos)
 
-	return fmt.Sprintf("\n%s%s\n%s", todoStatus, borderStyle.Render(m.textarea.View()), hint)
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(todoStatus)
+	sb.WriteString(borderStyle.Render(m.textarea.View()))
+	sb.WriteString("\n")
+
+	if m.showSuggest && len(m.suggestions) > 0 {
+		sb.WriteString(m.renderSuggestions())
+	}
+
+	sb.WriteString(hint)
+	return sb.String()
 }
 
 // readInput launches a bubbletea program to collect user input.
-func readInput(store tools.TodoStore) InputResult {
-	model := newInputModel(store.Get())
+func readInput(store tools.TodoStore, commands []SlashCommand) InputResult {
+	model := newInputModel(store.Get(), commands)
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 	finalModel, err := p.Run()
