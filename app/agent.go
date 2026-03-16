@@ -24,8 +24,9 @@ type AgentConfig struct {
 	SkillManager *skills.Manager
 	ReminderMgr  *reminder.Manager
 	GuardMgr     *guard.Manager
-	TodoStore    tools.TodoStore
-	TaskTitle    string // Current task title for notifications
+	TodoStore        tools.TodoStore
+	TaskTitle        string   // Current task title for notifications
+	InstructionFiles []string // Discovered CLAUDE.md/AGENTS.md relative paths
 }
 
 type AgentCallbacks struct {

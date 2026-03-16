@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/config"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/notify"
@@ -69,6 +70,16 @@ func main() {
 
 	skillManager := skills.DefaultManager()
 	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
+
+	// Discover CLAUDE.md and AGENTS.md instruction files
+	wd, _ := os.Getwd()
+	discovered := config.DiscoverInstructionFiles(wd)
+	// Merge project and user files into a single list for the system prompt
+	var instructionFiles []string
+	instructionFiles = append(instructionFiles, discovered.ProjectFiles...)
+	for _, f := range discovered.UserFiles {
+		instructionFiles = append(instructionFiles, "~/"+f)
+	}
 
 	reminderMgr := reminder.NewManager()
 
@@ -144,15 +155,16 @@ func main() {
 	// Interactive permission handler is set in runInteractive
 
 	config := &AgentConfig{
-		Provider:     llm.NewOpenAIProvider(apiKey, baseUrl),
-		Model:        model,
-		Reasoning:    reasoningEffort,
-		MaxTurns:     maxTurns,
-		ToolManager:  toolManager,
-		SkillManager: skillManager,
-		ReminderMgr:  reminderMgr,
-		GuardMgr:     guardMgr,
-		TodoStore:    todoStore,
+		Provider:         llm.NewOpenAIProvider(apiKey, baseUrl),
+		Model:            model,
+		Reasoning:        reasoningEffort,
+		MaxTurns:         maxTurns,
+		ToolManager:      toolManager,
+		SkillManager:     skillManager,
+		ReminderMgr:      reminderMgr,
+		GuardMgr:         guardMgr,
+		TodoStore:        todoStore,
+		InstructionFiles: instructionFiles,
 	}
 
 	if prompt != "" {
@@ -164,7 +176,7 @@ func main() {
 
 func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
 	messages := []llm.Message{
-		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager)),
+		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager, config.InstructionFiles)),
 	}
 	return messages, toolDefsFromManager(config.ToolManager)
 }

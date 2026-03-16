@@ -12,7 +12,22 @@ import (
 	"github.com/sazid/bitcode/internal/skills"
 )
 
-func buildSystemPrompt(skillManager *skills.Manager) string {
+// formatInstructionFilePaths returns a system prompt section listing
+// discovered instruction files, or "" if the slice is empty.
+func formatInstructionFilePaths(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n# Project Instructions\n")
+	sb.WriteString("The following instruction files exist in this project. Read the relevant ones when working in or near their directories.\n\n")
+	for _, f := range files {
+		fmt.Fprintf(&sb, " - %s\n", f)
+	}
+	return sb.String()
+}
+
+func buildSystemPrompt(skillManager *skills.Manager, instructionFiles []string) string {
 	wd, _ := os.Getwd()
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -135,6 +150,9 @@ Do NOT use TodoWrite for single trivial tasks.
 	fmt.Fprintf(&sb, " - Shell: %s\n", shell)
 	fmt.Fprintf(&sb, " - OS Version: %s\n", osVersion)
 	fmt.Fprintf(&sb, " - Current date and time: %s\n", dateTime)
+
+	// Add discovered instruction file paths
+	sb.WriteString(formatInstructionFilePaths(instructionFiles))
 
 	// Add skill names, descriptions, and trigger conditions
 	skillList := skillManager.List()
