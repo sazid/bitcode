@@ -7,11 +7,13 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/sazid/bitcode/internal/notify"
 )
 
 // TerminalPermissionHandler creates a PermissionHandler that prompts the user
 // in the terminal. pauseThinking/resumeThinking control the spinner.
-func TerminalPermissionHandler(pauseThinking, resumeThinking func()) PermissionHandler {
+// taskTitle returns the current task title for desktop notifications.
+func TerminalPermissionHandler(pauseThinking, resumeThinking func(), taskTitle func() string) PermissionHandler {
 	return func(toolName string, decision Decision) PermissionResult {
 		if pauseThinking != nil {
 			pauseThinking()
@@ -21,6 +23,12 @@ func TerminalPermissionHandler(pauseThinking, resumeThinking func()) PermissionH
 				resumeThinking()
 			}
 		}()
+
+		title := "BitCode"
+		if t := taskTitle(); t != "" {
+			title = "BitCode: " + notify.Truncate(t, 40)
+		}
+		notify.Send(title, "Approval needed for "+toolName)
 
 		return runPermissionPrompt(toolName, decision)
 	}

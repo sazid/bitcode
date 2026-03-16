@@ -14,6 +14,7 @@ import (
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/notify"
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
@@ -193,6 +194,7 @@ func defaultCallbacks(config *AgentConfig) AgentCallbacks {
 				}
 			},
 			nil, // no resume — spinner restarts on next OnThinking(true)
+			func() string { return config.TaskTitle },
 		))
 	}
 
@@ -223,6 +225,8 @@ func defaultCallbacks(config *AgentConfig) AgentCallbacks {
 
 // runSingleShot runs a single prompt through the agent loop and exits.
 func runSingleShot(config *AgentConfig, prompt string) {
+	config.TaskTitle = prompt
+
 	messages, toolDefs := newConversation(config)
 	messages = append(messages, llm.TextMessage(llm.RoleUser, prompt))
 
@@ -237,6 +241,9 @@ func runSingleShot(config *AgentConfig, prompt string) {
 	}()
 
 	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
+
+	title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
+	notify.Send(title, "Finished working")
 }
 
 // runInteractive runs the interactive REPL mode.
@@ -347,6 +354,7 @@ func runInteractive(config *AgentConfig) {
 		userStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 		fmt.Fprintf(os.Stderr, "\n%s %s\n", userStyle.Render(">"), result.Text)
 
+		config.TaskTitle = result.Text
 		messages = append(messages, llm.TextMessage(llm.RoleUser, result.Text))
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -364,6 +372,9 @@ func runInteractive(config *AgentConfig) {
 		}()
 
 		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
+
+		title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
+		notify.Send(title, "Waiting for input")
 
 		signal.Stop(sigCh)
 		cancel()

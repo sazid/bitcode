@@ -103,7 +103,7 @@ var denyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|(-[a-zA-Z]*f[a-zA-Z]*r))\s+\$HOME\b`),
 	regexp.MustCompile(`\bmkfs\b`),
 	regexp.MustCompile(`\bdd\b.*\bof=/dev/`),
-	regexp.MustCompile(`:\(\)\{.*\|.*\};:`),               // fork bomb
+	regexp.MustCompile(`:\(\)\{.*\|.*\};:`), // fork bomb
 	regexp.MustCompile(`\bchmod\s+-R\s+777\s+/\s*$`),
 }
 

@@ -14,9 +14,9 @@ var pluginDirs = []string{".agents", ".claude", ".bitcode"}
 
 // pluginFrontmatter represents the structure of a guard plugin file.
 type pluginFrontmatter struct {
-	ID       string         `yaml:"id"`
-	Tool     string         `yaml:"tool"`
-	Patterns []pluginMatch  `yaml:"patterns"`
+	ID       string        `yaml:"id"`
+	Tool     string        `yaml:"tool"`
+	Patterns []pluginMatch `yaml:"patterns"`
 }
 
 type pluginMatch struct {
@@ -34,10 +34,10 @@ type PluginRule struct {
 }
 
 type compiledPattern struct {
-	matchRe   *regexp.Regexp // for Bash command matching
-	fileGlob  string         // for file tool matching
-	verdict   Verdict
-	reason    string
+	matchRe  *regexp.Regexp // for Bash command matching
+	fileGlob string         // for file tool matching
+	verdict  Verdict
+	reason   string
 }
 
 func (r *PluginRule) Evaluate(ctx *EvalContext) *Decision {
@@ -222,4 +222,3 @@ func parseGuardMarkdownFrontmatter(content string) pluginFrontmatter {
 
 	return fm
 }
-

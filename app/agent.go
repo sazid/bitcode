@@ -25,6 +25,7 @@ type AgentConfig struct {
 	ReminderMgr  *reminder.Manager
 	GuardMgr     *guard.Manager
 	TodoStore    tools.TodoStore
+	TaskTitle    string // Current task title for notifications
 }
 
 type AgentCallbacks struct {

@@ -76,12 +76,12 @@ type memFileInfo struct {
 	isDir bool
 }
 
-func (fi *memFileInfo) Name() string      { return fi.name }
-func (fi *memFileInfo) Size() int64       { return fi.size }
-func (fi *memFileInfo) Mode() fs.FileMode { return 0o444 }
+func (fi *memFileInfo) Name() string       { return fi.name }
+func (fi *memFileInfo) Size() int64        { return fi.size }
+func (fi *memFileInfo) Mode() fs.FileMode  { return 0o444 }
 func (fi *memFileInfo) ModTime() time.Time { return time.Time{} }
-func (fi *memFileInfo) IsDir() bool       { return fi.isDir }
-func (fi *memFileInfo) Sys() any          { return nil }
+func (fi *memFileInfo) IsDir() bool        { return fi.isDir }
+func (fi *memFileInfo) Sys() any           { return nil }
 
 // memDirEntry implements fs.DirEntry.
 type memDirEntry struct {
@@ -89,7 +89,9 @@ type memDirEntry struct {
 	size int64
 }
 
-func (e *memDirEntry) Name() string               { return e.name }
-func (e *memDirEntry) IsDir() bool                { return false }
-func (e *memDirEntry) Type() fs.FileMode          { return 0 }
-func (e *memDirEntry) Info() (fs.FileInfo, error) { return &memFileInfo{name: e.name, size: e.size}, nil }
+func (e *memDirEntry) Name() string      { return e.name }
+func (e *memDirEntry) IsDir() bool       { return false }
+func (e *memDirEntry) Type() fs.FileMode { return 0 }
+func (e *memDirEntry) Info() (fs.FileInfo, error) {
+	return &memFileInfo{name: e.name, size: e.size}, nil
+}

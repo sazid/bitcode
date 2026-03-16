@@ -32,7 +32,7 @@ type Schedule struct {
 // Reminder represents a piece of context to inject into the conversation.
 type Reminder struct {
 	ID       string
-	Content  string   // text to wrap in <system-reminder> tags
+	Content  string // text to wrap in <system-reminder> tags
 	Schedule Schedule
 	Source   string // "builtin", "plugin"
 	Priority int    // higher = injected later (more LLM attention)
