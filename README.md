@@ -2,6 +2,9 @@
 
 <div align="center">
 
+<img src="docs/logos/stream-v5-icon-only.svg" alt="BitCode logo" width="128" height="128">
+
+
 **[Download latest release](https://github.com/sazid/bitcode/releases/latest)** — Linux and macOS (amd64 / arm64) · Windows: use WSL or a VM
 
 </div>

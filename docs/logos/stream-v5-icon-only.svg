@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="gi1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D4AA"/>
+      <stop offset="100%" style="stop-color:#7C5CFF"/>
+    </linearGradient>
+    <linearGradient id="gi2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00D4AA;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#7C5CFF;stop-opacity:0.1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background: rounded square (app icon shape) -->
+  <rect width="128" height="128" rx="28" fill="#0D1117"/>
+  <rect x="1" y="1" width="126" height="126" rx="27" fill="none" stroke="url(#gi1)" stroke-width="1.5" opacity="0.3"/>
+
+  <!-- Binary streams converging from edges toward center -->
+  <g font-family="'SF Mono', 'Fira Code', monospace">
+    <!-- Top-left stream -->
+    <text font-size="9" fill="#00D4AA" opacity="0.15"><tspan x="14" y="22">0</tspan></text>
+    <text font-size="9" fill="#00D4AA" opacity="0.25"><tspan x="22" y="30">1</tspan></text>
+    <text font-size="10" fill="#00D4AA" opacity="0.4"><tspan x="30" y="38">1</tspan></text>
+    <text font-size="10" fill="#00CCAA" opacity="0.55"><tspan x="38" y="46">0</tspan></text>
+
+    <!-- Top-right stream -->
+    <text font-size="9" fill="#7C5CFF" opacity="0.15"><tspan x="106" y="22">1</tspan></text>
+    <text font-size="9" fill="#7C5CFF" opacity="0.25"><tspan x="98" y="30">0</tspan></text>
+    <text font-size="10" fill="#7460F0" opacity="0.4"><tspan x="90" y="38">1</tspan></text>
+    <text font-size="10" fill="#6C6CE6" opacity="0.55"><tspan x="82" y="46">0</tspan></text>
+
+    <!-- Bottom-left stream -->
+    <text font-size="9" fill="#00D4AA" opacity="0.15"><tspan x="14" y="110">1</tspan></text>
+    <text font-size="9" fill="#00D4AA" opacity="0.25"><tspan x="22" y="102">0</tspan></text>
+    <text font-size="10" fill="#10C4B0" opacity="0.4"><tspan x="30" y="94">0</tspan></text>
+    <text font-size="10" fill="#20B8B8" opacity="0.55"><tspan x="38" y="86">1</tspan></text>
+
+    <!-- Bottom-right stream -->
+    <text font-size="9" fill="#7C5CFF" opacity="0.15"><tspan x="106" y="110">0</tspan></text>
+    <text font-size="9" fill="#7C5CFF" opacity="0.25"><tspan x="98" y="102">1</tspan></text>
+    <text font-size="10" fill="#7858F4" opacity="0.4"><tspan x="90" y="94">1</tspan></text>
+    <text font-size="10" fill="#7060EC" opacity="0.55"><tspan x="82" y="86">0</tspan></text>
+
+    <!-- Left stream (horizontal) -->
+    <text font-size="9" fill="#00D4AA" opacity="0.2"><tspan x="14" y="67">1</tspan></text>
+    <text font-size="10" fill="#00D4AA" opacity="0.35"><tspan x="24" y="66">0</tspan></text>
+    <text font-size="10" fill="#10C8B0" opacity="0.5"><tspan x="34" y="65">1</tspan></text>
+
+    <!-- Right stream (horizontal) -->
+    <text font-size="9" fill="#7C5CFF" opacity="0.2"><tspan x="108" y="67">0</tspan></text>
+    <text font-size="10" fill="#7C5CFF" opacity="0.35"><tspan x="97" y="66">1</tspan></text>
+    <text font-size="10" fill="#7460F0" opacity="0.5"><tspan x="87" y="65">0</tspan></text>
+
+    <!-- Top stream (vertical) -->
+    <text font-size="9" fill="#30A8C0" opacity="0.2"><tspan x="61" y="18">0</tspan></text>
+    <text font-size="10" fill="#3CA0C4" opacity="0.35"><tspan x="60" y="28">1</tspan></text>
+    <text font-size="10" fill="#4898CC" opacity="0.5"><tspan x="61" y="38">0</tspan></text>
+
+    <!-- Bottom stream (vertical) -->
+    <text font-size="9" fill="#5880D6" opacity="0.2"><tspan x="61" y="118">1</tspan></text>
+    <text font-size="10" fill="#5484D4" opacity="0.35"><tspan x="60" y="108">0</tspan></text>
+    <text font-size="10" fill="#5088D2" opacity="0.5"><tspan x="61" y="98">1</tspan></text>
+  </g>
+
+  <!-- Center: "B" letterform — bold, glowing -->
+  <text x="64" y="78" text-anchor="middle" font-family="'SF Mono', 'Fira Code', 'JetBrains Mono', monospace" font-size="48" font-weight="800" fill="url(#gi1)">B</text>
+
+  <!-- Subtle glow rings -->
+  <circle cx="64" cy="66" r="26" fill="none" stroke="url(#gi1)" stroke-width="1" opacity="0.15"/>
+  <circle cx="64" cy="66" r="36" fill="none" stroke="url(#gi1)" stroke-width="0.5" opacity="0.08"/>
+</svg>
