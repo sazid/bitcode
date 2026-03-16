@@ -78,23 +78,31 @@ type sessionModel struct {
 	agentCancel context.CancelFunc
 	todoStore   tools.TodoStore
 
+	width    int // terminal width from WindowSizeMsg
 	quitting bool
 }
 
 func newSessionModel(config *AgentConfig, commands []SlashCommand, submitCh chan InputResult) sessionModel {
 	ta := textarea.New()
 	ta.Placeholder = "Ask anything... (Enter for newline, Ctrl+S to submit)"
-	ta.Prompt = ""
+	ta.Prompt = "\u276f "
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	ta.SetHeight(2)
 	ta.MaxHeight = 20
+	ta.SetPromptFunc(2, func(lineIdx int) string {
+		if lineIdx == 0 {
+			return "\u276f "
+		}
+		return "  "
+	})
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	ta.FocusedStyle.Text = lipgloss.NewStyle()
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	ta.Focus()
 
 	ti := textinput.New()
@@ -244,7 +252,8 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		m.textarea.SetWidth(msg.Width - 6)
+		m.width = msg.Width
+		m.textarea.SetWidth(msg.Width - 1) // 1 char left margin in View
 	}
 
 	// Pre-grow textarea before processing keystroke
@@ -337,13 +346,19 @@ func (m sessionModel) View() string {
 		return sb.String()
 	}
 
-	// Textarea
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("6")).
-		Padding(0, 1)
+	// Textarea with horizontal-line borders
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	hline := lineStyle.Render(strings.Repeat("\u2500", w))
 
-	sb.WriteString(borderStyle.Render(m.textarea.View()))
+	sb.WriteString(hline)
+	sb.WriteString("\n")
+	sb.WriteString(lipgloss.NewStyle().PaddingLeft(1).Render(m.textarea.View()))
+	sb.WriteString("\n")
+	sb.WriteString(hline)
 	sb.WriteString("\n")
 
 	// Autocomplete suggestions
@@ -381,10 +396,14 @@ func (m sessionModel) renderPermissionPrompt() string {
 
 func (m *sessionModel) resizeTextarea() {
 	visLines := 0
-	width := m.textarea.Width()
+	// Subtract prompt display width (❯ + space = 2 columns) for wrapping calc
+	textWidth := m.textarea.Width() - 2
+	if textWidth <= 0 {
+		textWidth = 1
+	}
 	for line := range strings.SplitSeq(m.textarea.Value(), "\n") {
-		if width > 0 && len(line) > width {
-			visLines += (len(line) + width - 1) / width
+		if len(line) > textWidth {
+			visLines += (len(line) + textWidth - 1) / textWidth
 		} else {
 			visLines++
 		}
@@ -523,7 +542,6 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	userStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	skillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 
 	// Wire permission handler to route through the TUI
@@ -638,8 +656,12 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 				continue
 			}
 
-			// Show the user's message
-			p.Println(fmt.Sprintf("\n%s %s", userStyle.Render(">"), text))
+			// Show the user's message with a subtle background highlight
+			userMsgStyle := lipgloss.NewStyle().
+				Background(lipgloss.Color("236")).
+				Bold(true).
+				Foreground(lipgloss.Color("6"))
+			p.Println("\n" + userMsgStyle.Render(fmt.Sprintf(" > %s ", text)))
 
 			if agentRunning {
 				// Inject message mid-flight
@@ -665,7 +687,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 						p.Send(agentDoneMsg{})
 						agentDoneCh <- struct{}{}
 						title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
-						notify.Send(title, "Waiting for input")
+						notify.Send(title, "Done")
 					}()
 					runAgentLoop(ctx, config, &messages, toolDefs, sessionCallbacks(p, config))
 				}()
