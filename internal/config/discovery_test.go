@@ -198,4 +198,3 @@ func TestDiscoverGit_NestedGitignore(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expected, result.ProjectFiles)
 	}
 }
-

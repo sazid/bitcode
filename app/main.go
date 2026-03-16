@@ -107,6 +107,39 @@ func main() {
 		Active:   true,
 	})
 
+	// Periodic reminder about instruction files
+	if len(instructionFiles) > 0 {
+		reminderMgr.Register(reminder.Reminder{
+			ID:      "instruction-files",
+			Content: buildInstructionFilesReminderContent(instructionFiles),
+			Schedule: reminder.Schedule{
+				Kind:         reminder.ScheduleTurn,
+				TurnInterval: 8,
+			},
+			Source:   "builtin",
+			Priority: 0,
+			Active:   true,
+		})
+	}
+
+	// End-of-work reminder to update instruction files
+	if len(instructionFiles) > 0 {
+		reminderMgr.Register(reminder.Reminder{
+			ID:      "update-instruction-files",
+			Content: "You've done significant work in this session. Before finishing, consider whether the project's instruction files (CLAUDE.md, AGENTS.md) should be updated to reflect important changes — such as new conventions, architecture decisions, build commands, or key patterns. Only update if genuinely relevant and important; skip for minor or routine changes.",
+			Schedule: reminder.Schedule{
+				Kind:     reminder.ScheduleCondition,
+				MaxFires: 1,
+				Condition: func(state *reminder.ConversationState) bool {
+					return state.Turn >= 12
+				},
+			},
+			Source:   "builtin",
+			Priority: 2,
+			Active:   true,
+		})
+	}
+
 	// Load reminder plugins from disk
 	for _, r := range reminder.LoadPlugins() {
 		reminderMgr.Register(r)
@@ -408,6 +441,16 @@ func runInteractive(config *AgentConfig) {
 		signal.Stop(sigCh)
 		cancel()
 	}
+}
+
+// buildInstructionFilesReminderContent creates reminder content listing discovered instruction files.
+func buildInstructionFilesReminderContent(files []string) string {
+	var sb strings.Builder
+	sb.WriteString("The following instruction files are available. Read them when working in or near their directories:\n")
+	for _, f := range files {
+		fmt.Fprintf(&sb, " - %s\n", f)
+	}
+	return sb.String()
 }
 
 // buildSkillReminderContent creates reminder content listing available skills.
