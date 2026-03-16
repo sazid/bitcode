@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/config"
@@ -226,23 +226,8 @@ func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
 	return defs
 }
 
-func defaultCallbacks(config *AgentConfig) AgentCallbacks {
+func singleShotCallbacks(todoStore tools.TodoStore) AgentCallbacks {
 	var spin *Spinner
-
-	// Wire interactive permission handler with spinner pause/resume
-	if config.GuardMgr != nil {
-		config.GuardMgr.SetPermissionHandler(guard.TerminalPermissionHandler(
-			func() {
-				if spin != nil {
-					spin.Stop()
-					spin = nil
-				}
-			},
-			nil, // no resume — spinner restarts on next OnThinking(true)
-			func() string { return config.TaskTitle },
-		))
-	}
-
 	return AgentCallbacks{
 		OnContent: func(content string) {
 			renderMarkdown(os.Stderr, content)
@@ -250,8 +235,8 @@ func defaultCallbacks(config *AgentConfig) AgentCallbacks {
 		OnThinking: func(active bool) {
 			if active {
 				var todos []tools.TodoItem
-				if config.TodoStore != nil {
-					todos = config.TodoStore.Get()
+				if todoStore != nil {
+					todos = todoStore.Get()
 				}
 				spin = StartSpinner(os.Stderr, todos)
 			} else if spin != nil {
@@ -285,25 +270,33 @@ func runSingleShot(config *AgentConfig, prompt string) {
 		cancel()
 	}()
 
-	runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
+	runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(config.TodoStore))
 
 	title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
 	notify.Send(title, "Finished working")
 }
 
-// runInteractive runs the interactive REPL mode.
+// runInteractive runs the interactive REPL mode with a persistent TUI.
 func runInteractive(config *AgentConfig) {
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-
 	printWelcomeBanner(config.Model, config.Reasoning)
 
-	messages, toolDefs := newConversation(config)
-
 	// Build slash command list for autocomplete
-	slashCommands := []SlashCommand{
+	slashCommands := buildSlashCommands(config)
+	submitCh := make(chan InputResult, 1)
+
+	model := newSessionModel(config, slashCommands, submitCh)
+	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
+
+	// Orchestrator goroutine manages agent lifecycle
+	go runOrchestrator(p, config, submitCh)
+
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+}
+
+func buildSlashCommands(config *AgentConfig) []SlashCommand {
+	commands := []SlashCommand{
 		{Name: "new", Description: "Start a new conversation", Source: "builtin"},
 		{Name: "reasoning", Description: "Set reasoning effort (none/low/medium/high/xhigh)", Source: "builtin"},
 		{Name: "turns", Description: "Get or set max agent turns", Source: "builtin"},
@@ -312,135 +305,13 @@ func runInteractive(config *AgentConfig) {
 		{Name: "quit", Description: "Exit BitCode", Source: "builtin"},
 	}
 	for _, s := range config.SkillManager.List() {
-		slashCommands = append(slashCommands, SlashCommand{
+		commands = append(commands, SlashCommand{
 			Name:        s.Name,
 			Description: s.Description,
 			Source:      s.Source,
 		})
 	}
-
-	for {
-		result := readInput(config.TodoStore, slashCommands)
-
-		if result.EOF {
-			fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
-			break
-		}
-
-		if result.Command != "" {
-			// Extract command name and optional arguments
-			cmdParts := strings.SplitN(result.Command, " ", 2)
-			cmdName := cmdParts[0]
-			cmdArgs := ""
-			if len(cmdParts) > 1 {
-				cmdArgs = strings.TrimSpace(cmdParts[1])
-			}
-
-			switch cmdName {
-			case "/exit", "/quit":
-				fmt.Fprintln(os.Stderr, dimStyle.Render("\nGoodbye!"))
-				return
-			case "/new":
-				config.TodoStore.Clear()
-				messages, toolDefs = newConversation(config)
-				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Started new conversation"))
-				continue
-			case "/help":
-				printHelp(config.SkillManager)
-				continue
-			case "/turns":
-				if cmdArgs == "" {
-					fmt.Fprintln(os.Stderr, dimStyle.Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns)))
-					continue
-				}
-				var n int
-				if _, err := fmt.Sscan(cmdArgs, &n); err != nil || n <= 0 {
-					fmt.Fprintln(os.Stderr, errorStyle.Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs)))
-					continue
-				}
-				config.MaxTurns = n
-				fmt.Fprintln(os.Stderr, successStyle.Render(fmt.Sprintf("\n  ✓ Max turns set to %d", config.MaxTurns)))
-				continue
-			case "/reasoning":
-				validEfforts := []string{"none", "low", "medium", "high", "xhigh"}
-				args := strings.ToLower(cmdArgs)
-				if args == "" || args == "default" || args == "clear" {
-					config.Reasoning = ""
-					fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Reasoning effort reset to default"))
-					printWelcomeBanner(config.Model, config.Reasoning)
-					continue
-				}
-				valid := false
-				for _, e := range validEfforts {
-					if args == e {
-						valid = true
-						break
-					}
-				}
-				if !valid {
-					fmt.Fprintln(os.Stderr, errorStyle.Render(
-						fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs),
-					))
-					fmt.Fprintln(os.Stderr, dimStyle.Render("  Valid options: none, low, medium, high, xhigh, default"))
-					continue
-				}
-				config.Reasoning = args
-				fmt.Fprintln(os.Stderr, successStyle.Render("\n  ✓ Reasoning effort set to "+config.Reasoning))
-				printWelcomeBanner(config.Model, config.Reasoning)
-				continue
-			default:
-				// Check if it's a skill
-				skillName := strings.TrimPrefix(cmdName, "/")
-				if skill, ok := config.SkillManager.Get(skillName); ok {
-					prompt := skill.FormatPrompt(cmdArgs)
-
-					skillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-					fmt.Fprintf(os.Stderr, "\n%s %s\n", skillStyle.Render("⚡"), skill.Name)
-
-					result.Text = prompt
-				} else {
-					fmt.Fprintln(os.Stderr, errorStyle.Render(
-						fmt.Sprintf("\n  Unknown command: %s", cmdName),
-					))
-					fmt.Fprintln(os.Stderr, dimStyle.Render("  Type /help for available commands"))
-					continue
-				}
-			}
-		}
-
-		if result.Text == "" {
-			continue
-		}
-
-		// Show the user's message
-		userStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-		fmt.Fprintf(os.Stderr, "\n%s %s\n", userStyle.Render(">"), result.Text)
-
-		config.TaskTitle = result.Text
-		messages = append(messages, llm.TextMessage(llm.RoleUser, result.Text))
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT)
-
-		go func() {
-			select {
-			case <-sigCh:
-				fmt.Fprintln(os.Stderr, warningStyle.Render("\n⏹ Interrupted"))
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
-
-		runAgentLoop(ctx, config, &messages, toolDefs, defaultCallbacks(config))
-
-		title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
-		notify.Send(title, "Waiting for input")
-
-		signal.Stop(sigCh)
-		cancel()
-	}
+	return commands
 }
 
 // buildInstructionFilesReminderContent creates reminder content listing discovered instruction files.

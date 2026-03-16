@@ -27,6 +27,7 @@ type AgentConfig struct {
 	TodoStore        tools.TodoStore
 	TaskTitle        string   // Current task title for notifications
 	InstructionFiles []string // Discovered CLAUDE.md/AGENTS.md relative paths
+	InjectedMessages chan string // optional; user messages injected mid-flight
 }
 
 type AgentCallbacks struct {
@@ -34,6 +35,22 @@ type AgentCallbacks struct {
 	OnThinking func(thinking bool)
 	OnEvent    func(event internal.Event)
 	OnError    func(err error)
+}
+
+// drainInjectedMessages pulls any pending user messages from the injection
+// channel and appends them to the conversation.
+func drainInjectedMessages(cfg *AgentConfig, messages *[]llm.Message) {
+	if cfg.InjectedMessages == nil {
+		return
+	}
+	for {
+		select {
+		case msg := <-cfg.InjectedMessages:
+			*messages = append(*messages, llm.TextMessage(llm.RoleUser, msg))
+		default:
+			return
+		}
+	}
 }
 
 func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message, toolDefs []llm.ToolDef, cb AgentCallbacks) {
@@ -60,6 +77,9 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 		if ctx.Err() != nil {
 			return
 		}
+
+		// Drain any user messages injected mid-flight
+		drainInjectedMessages(cfg, messages)
 
 		// Evaluate reminders and inject into a copy for the API
 		messagesForAPI := *messages
@@ -180,6 +200,9 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: content}},
 					ToolCallID: tc.ID,
 				})
+
+				// Drain injected messages after each tool execution
+				drainInjectedMessages(cfg, messages)
 			}
 
 		case llm.FinishStop:
