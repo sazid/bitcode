@@ -45,24 +45,26 @@ var inputKeys = inputKeyMap{
 
 // printWelcomeBanner displays the welcome banner with project info.
 func printWelcomeBanner(model, reasoning string) {
+	t := ActiveTheme()
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("6")). // cyan
+		Foreground(t.Primary).
 		PaddingLeft(1)
 
 	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(t.Dim).
 		PaddingLeft(2)
 
 	infoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("7")).
+		Foreground(t.Info).
 		PaddingLeft(2)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(t.Dim)
 
 	cmdStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("3")) // yellow
+		Foreground(t.Command)
 
 	wd, _ := os.Getwd()
 
@@ -95,25 +97,28 @@ func printWelcomeBanner(model, reasoning string) {
 
 // printHelp displays available commands and skills.
 func printHelp(w io.Writer, skillMgr *skills.Manager) {
+	t := ActiveTheme()
+
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("6"))
+		Foreground(t.Primary)
 
 	cmdStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("3")).
+		Foreground(t.Command).
 		Width(12)
 
 	descStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("7"))
+		Foreground(t.Info)
 
 	sourceStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(t.Dim)
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, headerStyle.Render("  Commands"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/new"), descStyle.Render("Start a new conversation"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/reasoning"), descStyle.Render("Set reasoning effort (none/low/medium/high/xhigh)"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/turns"), descStyle.Render("Get or set max agent turns (e.g. /turns 100)"))
+	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/theme"), descStyle.Render("Switch theme (dark/light/mono)"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/help"), descStyle.Render("Show this help message"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("/exit"), descStyle.Render("Exit BitCode"))
 

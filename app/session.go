@@ -99,10 +99,11 @@ func newSessionModel(config *AgentConfig, commands []SlashCommand, submitCh chan
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
 	ta.BlurredStyle.Base = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	t := ActiveTheme()
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(t.Dim)
 	ta.FocusedStyle.Text = lipgloss.NewStyle()
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(t.Secondary)
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(t.Dim)
 	ta.Focus()
 
 	ti := textinput.New()
@@ -337,7 +338,8 @@ func (m sessionModel) View() string {
 	if m.spinnerActive {
 		frames := [...]string{"\u28cb", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"}
 		frame := frames[m.spinnerFrame%len(frames)]
-		sb.WriteString(fmt.Sprintf("\033[2m  %s %s\033[0m\n", frame, m.spinnerMsg))
+		th := ActiveTheme()
+		sb.WriteString(fmt.Sprintf("%s  %s %s%s\n", th.ANSIDim(), frame, m.spinnerMsg, th.ANSIReset()))
 	}
 
 	// Permission prompt (if in that state)
@@ -351,7 +353,7 @@ func (m sessionModel) View() string {
 	if w <= 0 {
 		w = 80
 	}
-	lineStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	lineStyle := lipgloss.NewStyle().Foreground(ActiveTheme().Dim)
 	hline := lineStyle.Render(strings.Repeat("\u2500", w))
 
 	sb.WriteString(hline)
@@ -367,7 +369,7 @@ func (m sessionModel) View() string {
 	}
 
 	// Context-dependent hints
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	hintStyle := lipgloss.NewStyle().Foreground(ActiveTheme().Dim)
 	if m.state == sessionAgentRunning {
 		sb.WriteString(hintStyle.Render("  ctrl+s send message \u00b7 ctrl+c interrupt \u00b7 ctrl+d exit"))
 	} else {
@@ -378,18 +380,23 @@ func (m sessionModel) View() string {
 }
 
 func (m sessionModel) renderPermissionPrompt() string {
+	t := ActiveTheme()
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n\033[33m\u26a0 Guard: %s\033[0m\n", m.permDecision.Reason)
+	fmt.Fprintf(&sb, "\n%s\u26a0 Guard: %s%s\n", t.ANSI(t.Warning), m.permDecision.Reason, t.ANSIReset())
 	fmt.Fprintf(&sb, "  Tool: %s\n", m.permToolName)
 	if m.permDecision.Command != "" {
-		fmt.Fprintf(&sb, "  \033[2m$ %s\033[0m\n", m.permDecision.Command)
+		fmt.Fprintf(&sb, "  %s$ %s%s\n", t.ANSIDim(), m.permDecision.Command, t.ANSIReset())
 	}
 
 	if m.permState == permPromptFeedback {
 		fmt.Fprintf(&sb, "\n  Tell the agent what to do:\n  %s\n", m.permFeedback.View())
-		fmt.Fprintf(&sb, "  \033[2mEnter to submit \u00b7 Esc to cancel\033[0m\n")
+		fmt.Fprintf(&sb, "  %sEnter to submit \u00b7 Esc to cancel%s\n", t.ANSIDim(), t.ANSIReset())
 	} else {
-		fmt.Fprintf(&sb, "\n  [\033[32my\033[0m] Allow once  [\033[32ma\033[0m] Always allow  [\033[31mn\033[0m] Deny  [\033[34mt\033[0m] Tell what to do\n")
+		fmt.Fprintf(&sb, "\n  [%sy%s] Allow once  [%sa%s] Always allow  [%sn%s] Deny  [%st%s] Tell what to do\n",
+			t.ANSI(t.Success), t.ANSIReset(),
+			t.ANSI(t.Success), t.ANSIReset(),
+			t.ANSI(t.Error), t.ANSIReset(),
+			t.ANSI(t.Link), t.ANSIReset())
 	}
 	return sb.String()
 }
@@ -452,10 +459,11 @@ func (m *sessionModel) updateSuggestions() {
 }
 
 func (m sessionModel) renderSuggestions() string {
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	selectedStyle := lipgloss.NewStyle().Background(lipgloss.Color("237"))
-	sourceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
+	th := ActiveTheme()
+	nameStyle := lipgloss.NewStyle().Foreground(th.Command)
+	descStyle := lipgloss.NewStyle().Foreground(th.Dim)
+	selectedStyle := lipgloss.NewStyle().Background(th.SelectedBg)
+	sourceStyle := lipgloss.NewStyle().Foreground(th.Dim).Faint(true)
 
 	maxShow := 8
 	count := len(m.suggestions)
@@ -523,7 +531,8 @@ func sessionCallbacks(p *tea.Program, config *AgentConfig) AgentCallbacks {
 			renderEvent(pw, e)
 		},
 		OnError: func(err error) {
-			p.Println(fmt.Sprintf("\033[31mError: %v\033[0m", err))
+			et := ActiveTheme()
+			p.Println(fmt.Sprintf("%sError: %v%s", et.ANSI(et.Error), err, et.ANSIReset()))
 		},
 	}
 }
@@ -538,11 +547,11 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 	injectedMessages := make(chan string, 8)
 	config.InjectedMessages = injectedMessages
 
-	// Styles
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	skillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
+	// Styles (closures capture ActiveTheme at render time)
+	successStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Success) }
+	dimStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Dim) }
+	errorStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Error) }
+	skillStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Secondary) }
 
 	// Wire permission handler to route through the TUI
 	if config.GuardMgr != nil {
@@ -591,25 +600,25 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 					return
 				case "/new":
 					if agentRunning {
-						p.Println(errorStyle.Render("\n  Cannot start new conversation while agent is running. Press Ctrl+C first."))
+						p.Println(errorStyle().Render("\n  Cannot start new conversation while agent is running. Press Ctrl+C first."))
 					} else {
 						config.TodoStore.Clear()
 						messages, toolDefs = newConversation(config)
-						p.Println(successStyle.Render("\n  \u2713 Started new conversation"))
+						p.Println(successStyle().Render("\n  \u2713 Started new conversation"))
 					}
 				case "/help":
 					pw := &programWriter{p: p}
 					printHelp(pw, config.SkillManager)
 				case "/turns":
 					if cmdArgs == "" {
-						p.Println(dimStyle.Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns)))
+						p.Println(dimStyle().Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns)))
 					} else {
 						var n int
 						if _, err := fmt.Sscan(cmdArgs, &n); err != nil || n <= 0 {
-							p.Println(errorStyle.Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs)))
+							p.Println(errorStyle().Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs)))
 						} else {
 							config.MaxTurns = n
-							p.Println(successStyle.Render(fmt.Sprintf("\n  \u2713 Max turns set to %d", config.MaxTurns)))
+							p.Println(successStyle().Render(fmt.Sprintf("\n  \u2713 Max turns set to %d", config.MaxTurns)))
 						}
 					}
 				case "/reasoning":
@@ -617,7 +626,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 					args := strings.ToLower(cmdArgs)
 					if args == "" || args == "default" || args == "clear" {
 						config.Reasoning = ""
-						p.Println(successStyle.Render("\n  \u2713 Reasoning effort reset to default"))
+						p.Println(successStyle().Render("\n  \u2713 Reasoning effort reset to default"))
 					} else {
 						valid := false
 						for _, e := range validEfforts {
@@ -627,22 +636,44 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 							}
 						}
 						if !valid {
-							p.Println(errorStyle.Render(fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs)))
-							p.Println(dimStyle.Render("  Valid options: none, low, medium, high, xhigh, default"))
+							p.Println(errorStyle().Render(fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs)))
+							p.Println(dimStyle().Render("  Valid options: none, low, medium, high, xhigh, default"))
 						} else {
 							config.Reasoning = args
-							p.Println(successStyle.Render("\n  \u2713 Reasoning effort set to " + config.Reasoning))
+							p.Println(successStyle().Render("\n  \u2713 Reasoning effort set to " + config.Reasoning))
+						}
+					}
+				case "/theme":
+					if cmdArgs == "" {
+						activeName := ActiveTheme().Name
+						var listing strings.Builder
+						listing.WriteString("\n  Themes:\n")
+						for _, name := range ThemeNames() {
+							marker := "  "
+							if name == activeName {
+								marker = "* "
+							}
+							listing.WriteString(fmt.Sprintf("    %s%s\n", marker, name))
+						}
+						p.Println(dimStyle().Render(listing.String()))
+					} else {
+						name := strings.ToLower(cmdArgs)
+						if SetTheme(name) {
+							p.Println(successStyle().Render(fmt.Sprintf("\n  \u2713 Theme set to %s", name)))
+						} else {
+							p.Println(errorStyle().Render(fmt.Sprintf("\n  Unknown theme: %s", cmdArgs)))
+							p.Println(dimStyle().Render("  Available: "+strings.Join(ThemeNames(), ", ")))
 						}
 					}
 				default:
 					skillName := strings.TrimPrefix(cmdName, "/")
 					if skill, ok := config.SkillManager.Get(skillName); ok {
 						text = skill.FormatPrompt(cmdArgs)
-						p.Println(fmt.Sprintf("\n%s %s", skillStyle.Render("\u26a1"), skill.Name))
+						p.Println(fmt.Sprintf("\n%s %s", skillStyle().Render("\u26a1"), skill.Name))
 						handled = false
 					} else {
-						p.Println(errorStyle.Render(fmt.Sprintf("\n  Unknown command: %s", cmdName)))
-						p.Println(dimStyle.Render("  Type /help for available commands"))
+						p.Println(errorStyle().Render(fmt.Sprintf("\n  Unknown command: %s", cmdName)))
+						p.Println(dimStyle().Render("  Type /help for available commands"))
 					}
 				}
 				if handled {
@@ -657,15 +688,16 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 			}
 
 			// Show the user's message with a subtle background highlight
+			ut := ActiveTheme()
 			userMsgStyle := lipgloss.NewStyle().
-				Background(lipgloss.Color("236")).
+				Background(ut.UserMsgBg).
 				Bold(true).
-				Foreground(lipgloss.Color("6"))
+				Foreground(ut.Primary)
 			p.Println("\n" + userMsgStyle.Render(fmt.Sprintf(" > %s ", text)))
 
 			if agentRunning {
 				// Inject message mid-flight
-				p.Println(dimStyle.Render("  (message will be delivered to the agent)"))
+				p.Println(dimStyle().Render("  (message will be delivered to the agent)"))
 				select {
 				case injectedMessages <- text:
 				default:
@@ -682,7 +714,8 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {
-							p.Println(fmt.Sprintf("\033[31mAgent panic: %v\033[0m", r))
+							pt := ActiveTheme()
+							p.Println(fmt.Sprintf("%sAgent panic: %v%s", pt.ANSI(pt.Error), r, pt.ANSIReset()))
 						}
 						p.Send(agentDoneMsg{})
 						agentDoneCh <- struct{}{}

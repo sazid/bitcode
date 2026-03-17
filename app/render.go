@@ -34,7 +34,7 @@ var spinnerMessages = []string{
 
 // renderMarkdown renders markdown text for terminal output using glamour.
 func renderMarkdown(w io.Writer, text string) {
-	rendered, err := glamour.Render(text, "dark")
+	rendered, err := glamour.Render(text, ActiveTheme().GlamourStyle)
 	if err != nil {
 		fmt.Fprintln(w, text)
 		return
@@ -75,7 +75,8 @@ func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 					msg = spinnerMessages[rand.Intn(len(spinnerMessages))]
 					nextSwap = i + 40 + rand.Intn(30)
 				}
-				fmt.Fprintf(w, "\r\033[K\033[2m  %s %s\033[0m", frames[i%len(frames)], msg)
+				t := ActiveTheme()
+				fmt.Fprintf(w, "\r\033[K%s  %s %s%s", t.ANSIDim(), frames[i%len(frames)], msg, t.ANSIReset())
 				i++
 			}
 		}
@@ -90,10 +91,11 @@ func (s *Spinner) Stop() {
 
 // coloredBullet returns ⏺ in green (success) or red (error).
 func coloredBullet(isError bool) string {
+	t := ActiveTheme()
 	if isError {
-		return "\033[31m⏺\033[0m" // red
+		return t.ANSI(t.Error) + "⏺" + t.ANSIReset()
 	}
-	return "\033[32m⏺\033[0m" // green
+	return t.ANSI(t.Success) + "⏺" + t.ANSIReset()
 }
 
 func renderEvent(w io.Writer, e internal.Event) {
@@ -119,15 +121,17 @@ func renderEvent(w io.Writer, e internal.Event) {
 }
 
 func renderGuardEvent(w io.Writer, e internal.Event) {
+	t := ActiveTheme()
 	tool := ""
 	if len(e.Args) > 0 {
 		tool = e.Args[0]
 	}
-	fmt.Fprintf(w, "\n\033[33m⏺ Guard(%s)\033[0m\n", tool)
-	fmt.Fprintf(w, "⎿  \033[33m%s\033[0m\n", e.Message)
+	fmt.Fprintf(w, "\n%s⏺ Guard(%s)%s\n", t.ANSI(t.Warning), tool, t.ANSIReset())
+	fmt.Fprintf(w, "⎿  %s%s%s\n", t.ANSI(t.Warning), e.Message, t.ANSIReset())
 }
 
 func renderBashEvent(w io.Writer, e internal.Event) {
+	t := ActiveTheme()
 	description := ""
 	command := ""
 	if len(e.Args) > 0 {
@@ -142,7 +146,7 @@ func renderBashEvent(w io.Writer, e internal.Event) {
 	} else {
 		fmt.Fprintf(w, "\n%s %s\n", coloredBullet(e.IsError), e.Name)
 	}
-	fmt.Fprintf(w, "  \033[2m$ %s\033[0m\n", command)
+	fmt.Fprintf(w, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
 	fmt.Fprintf(w, "⎿  %s\n", e.Message)
 
 	for _, line := range e.Preview {
@@ -151,23 +155,24 @@ func renderBashEvent(w io.Writer, e internal.Event) {
 }
 
 func renderPreviewLine(pt internal.PreviewType, line string) string {
+	t := ActiveTheme()
 	switch pt {
 	case internal.PreviewDiff:
 		if strings.HasPrefix(line, "+") {
-			return fmt.Sprintf("\033[32m%s\033[0m", line)
+			return t.ANSI(t.Success) + line + t.ANSIReset()
 		} else if strings.HasPrefix(line, "-") {
-			return fmt.Sprintf("\033[31m%s\033[0m", line)
+			return t.ANSI(t.Error) + line + t.ANSIReset()
 		}
 		return line
 	case internal.PreviewBash:
 		if strings.HasPrefix(line, "stderr:") {
-			return fmt.Sprintf("\033[31m%s\033[0m", strings.TrimPrefix(line, "stderr:"))
+			return t.ANSI(t.Error) + strings.TrimPrefix(line, "stderr:") + t.ANSIReset()
 		}
-		return fmt.Sprintf("\033[2m%s\033[0m", line)
+		return t.ANSIDim() + line + t.ANSIReset()
 	case internal.PreviewCode:
-		return fmt.Sprintf("\033[2m%s\033[0m", line)
+		return t.ANSIDim() + line + t.ANSIReset()
 	case internal.PreviewFileList:
-		return fmt.Sprintf("\033[36m%s\033[0m", line)
+		return t.ANSI(t.Primary) + line + t.ANSIReset()
 	default:
 		return line
 	}

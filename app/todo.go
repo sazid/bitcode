@@ -14,18 +14,19 @@ func RenderTodoStatus(todos []tools.TodoItem) string {
 		return ""
 	}
 
+	t := ActiveTheme()
 	completed := 0
 	var activeContent string
-	for _, t := range todos {
-		if t.Status == "completed" {
+	for _, td := range todos {
+		if td.Status == "completed" {
 			completed++
 		}
-		if t.Status == "in_progress" && activeContent == "" {
-			activeContent = t.Content
+		if td.Status == "in_progress" && activeContent == "" {
+			activeContent = td.Content
 		}
 	}
-	todoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Faint(true)
-	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
+	todoStyle := lipgloss.NewStyle().Foreground(t.Primary).Faint(true)
+	countStyle := lipgloss.NewStyle().Foreground(t.Dim).Faint(true)
 	count := countStyle.Render(fmt.Sprintf("[%d/%d]", completed, len(todos)))
 	if activeContent != "" {
 		return fmt.Sprintf("  %s %s\n", count, todoStyle.Render("● "+activeContent))

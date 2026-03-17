@@ -248,7 +248,8 @@ func singleShotCallbacks(todoStore tools.TodoStore) AgentCallbacks {
 			renderEvent(os.Stderr, e)
 		},
 		OnError: func(err error) {
-			fmt.Fprintf(os.Stderr, "\033[31mError: %v\033[0m\n", err)
+			t := ActiveTheme()
+			fmt.Fprintf(os.Stderr, "%sError: %v%s\n", t.ANSI(t.Error), err, t.ANSIReset())
 		},
 	}
 }
@@ -300,6 +301,7 @@ func buildSlashCommands(config *AgentConfig) []SlashCommand {
 		{Name: "new", Description: "Start a new conversation", Source: "builtin"},
 		{Name: "reasoning", Description: "Set reasoning effort (none/low/medium/high/xhigh)", Source: "builtin"},
 		{Name: "turns", Description: "Get or set max agent turns", Source: "builtin"},
+		{Name: "theme", Description: "Switch theme (dark/light/mono)", Source: "builtin"},
 		{Name: "help", Description: "Show available commands", Source: "builtin"},
 		{Name: "exit", Description: "Exit BitCode", Source: "builtin"},
 		{Name: "quit", Description: "Exit BitCode", Source: "builtin"},
