@@ -63,6 +63,8 @@ func main() {
 	toolManager.Register(&tools.GlobTool{})
 	toolManager.Register(&tools.BashTool{})
 	toolManager.Register(&tools.WebSearchTool{})
+	toolManager.Register(&tools.LineCountTool{})
+	toolManager.Register(&tools.FileSizeTool{})
 
 	todoStore := tools.NewTodoStore()
 	toolManager.Register(&tools.TodoReadTool{Store: todoStore})
