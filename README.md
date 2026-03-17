@@ -45,6 +45,9 @@ An agentic AI coding assistant in your terminal — with interactive TUI, smart 
 | Edit | Surgical find-and-replace edits |
 | Glob | Fast file pattern matching |
 | Bash | Execute shell commands |
+| LineCount | Count lines in a file (SIMD-optimized) |
+| FileSize | Get file size in bytes |
+| WebSearch | Search the web for current information |
 | TodoRead | Read current todo list |
 | TodoWrite | Create or update todo list |
 | Skill | Invoke user-defined prompt templates |
