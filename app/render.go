@@ -29,7 +29,7 @@ var spinnerMessages = []string{
 	"Reading the docs (jk)...",
 	"sudo think harder...",
 	"It's not a bug, it's a feature...",
-	"Have you tried turning it off and on?...",
+	"Have you tried turning it off and on?",
 }
 
 // renderMarkdown renders markdown text for terminal output using glamour.
@@ -42,18 +42,26 @@ func renderMarkdown(w io.Writer, text string) {
 	fmt.Fprint(w, strings.TrimRight(rendered, "\n")+"\n")
 }
 
-// Spinner shows a braille animation while the LLM is thinking.
+// Spinner shows a binary digits animation while the LLM is thinking.
 type Spinner struct {
 	w    io.Writer
 	stop chan struct{}
 	done chan struct{}
 }
 
+// randomBinary returns a string of n random '0' and '1' characters.
+func randomBinary(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = '0' + byte(rand.Intn(2))
+	}
+	return string(b)
+}
+
 func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 	s := &Spinner{w: w, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(s.done)
-		frames := [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		msg := spinnerMessages[rand.Intn(len(spinnerMessages))]
 		ticker := time.NewTicker(80 * time.Millisecond)
 		defer ticker.Stop()
@@ -76,7 +84,8 @@ func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 					nextSwap = i + 40 + rand.Intn(30)
 				}
 				t := ActiveTheme()
-				fmt.Fprintf(w, "\r\033[K%s  %s %s%s", t.ANSIDim(), frames[i%len(frames)], msg, t.ANSIReset())
+				bits := randomBinary(6)
+				fmt.Fprintf(w, "\r\033[K  %s%s%s %s%s%s", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), msg, t.ANSIReset())
 				i++
 			}
 		}

@@ -25,8 +25,8 @@ type AgentConfig struct {
 	ReminderMgr      *reminder.Manager
 	GuardMgr         *guard.Manager
 	TodoStore        tools.TodoStore
-	TaskTitle        string   // Current task title for notifications
-	InstructionFiles []string // Discovered CLAUDE.md/AGENTS.md relative paths
+	TaskTitle        string      // Current task title for notifications
+	InstructionFiles []string    // Discovered CLAUDE.md/AGENTS.md relative paths
 	InjectedMessages chan string // optional; user messages injected mid-flight
 }
 

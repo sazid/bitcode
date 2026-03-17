@@ -56,9 +56,10 @@ type sessionModel struct {
 	state    sessionState
 
 	// Spinner
-	spinnerActive bool
-	spinnerFrame  int
-	spinnerMsg    string
+	spinnerActive  bool
+	spinnerTicking bool
+	spinnerFrame   int
+	spinnerMsg     string
 
 	// Autocomplete
 	commands    []SlashCommand
@@ -142,18 +143,23 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.active {
 			m.spinnerFrame = 0
 			m.spinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
-			return m, m.tickSpinner()
+			if !m.spinnerTicking {
+				m.spinnerTicking = true
+				return m, m.tickSpinner()
+			}
 		}
 		return m, nil
 
 	case agentDoneMsg:
 		m.state = sessionIdle
 		m.spinnerActive = false
+		m.spinnerTicking = false
 		m.agentCancel = nil
 		return m, nil
 
 	case spinnerTickMsg:
 		if !m.spinnerActive {
+			m.spinnerTicking = false
 			return m, nil
 		}
 		m.spinnerFrame++
@@ -336,10 +342,9 @@ func (m sessionModel) View() string {
 
 	// Spinner (when agent active)
 	if m.spinnerActive {
-		frames := [...]string{"\u28cb", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"}
-		frame := frames[m.spinnerFrame%len(frames)]
 		th := ActiveTheme()
-		sb.WriteString(fmt.Sprintf("%s  %s %s%s\n", th.ANSIDim(), frame, m.spinnerMsg, th.ANSIReset()))
+		bits := randomBinary(6)
+		fmt.Fprintf(&sb, "\n  %s%s%s %s%s%s\n", th.ANSI(th.Primary), bits, th.ANSIReset(), th.ANSIDim(), m.spinnerMsg, th.ANSIReset())
 	}
 
 	// Permission prompt (if in that state)
@@ -662,7 +667,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 							p.Println(successStyle().Render(fmt.Sprintf("\n  \u2713 Theme set to %s", name)))
 						} else {
 							p.Println(errorStyle().Render(fmt.Sprintf("\n  Unknown theme: %s", cmdArgs)))
-							p.Println(dimStyle().Render("  Available: "+strings.Join(ThemeNames(), ", ")))
+							p.Println(dimStyle().Render("  Available: " + strings.Join(ThemeNames(), ", ")))
 						}
 					}
 				default:
