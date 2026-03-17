@@ -23,7 +23,7 @@ chmod +x "$TMPFILE"
 # --- Find a suitable install directory ---
 
 # Candidate user-writable directories (checked in preference order)
-USER_BIN_DIRS="$HOME/.local/bin $HOME/bin
+USER_BIN_DIRS="$HOME/.local/bin $HOME/bin"
 
 INSTALL_DIR=""
 for dir in $USER_BIN_DIRS; do
