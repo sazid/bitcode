@@ -1,10 +1,16 @@
 package guard
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/sazid/bitcode/internal"
 )
+
+// GuardEvaluator is the interface for evaluating tool calls against guard rules.
+type GuardEvaluator interface {
+	Evaluate(ctx context.Context, toolName, input string, eventsCh chan<- internal.Event) (*Decision, error)
+}
 
 // Verdict represents the outcome of a guard rule evaluation.
 type Verdict string

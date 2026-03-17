@@ -2,15 +2,18 @@ package main
 
 import "github.com/charmbracelet/lipgloss"
 
-func init() {
-	RegisterTheme(darkTheme())
-	RegisterTheme(lightTheme())
-	RegisterTheme(monoTheme())
-	// Dark is the default — ensure it's active even if registration order changes.
-	SetTheme("dark")
+// DefaultThemeRegistry creates a ThemeRegistry with all built-in themes registered
+// and dark set as the active theme.
+func DefaultThemeRegistry() *ThemeRegistry {
+	r := NewThemeRegistry()
+	r.Register(DarkTheme())
+	r.Register(LightTheme())
+	r.Register(MonoTheme())
+	r.Set("dark")
+	return r
 }
 
-func darkTheme() *Theme {
+func DarkTheme() *Theme {
 	return &Theme{
 		Name:         "dark",
 		Primary:      lipgloss.Color("6"),
@@ -28,7 +31,7 @@ func darkTheme() *Theme {
 	}
 }
 
-func lightTheme() *Theme {
+func LightTheme() *Theme {
 	return &Theme{
 		Name:         "light",
 		Primary:      lipgloss.Color("25"),
@@ -46,7 +49,7 @@ func lightTheme() *Theme {
 	}
 }
 
-func monoTheme() *Theme {
+func MonoTheme() *Theme {
 	return &Theme{
 		Name:         "mono",
 		Primary:      lipgloss.Color("250"),

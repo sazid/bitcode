@@ -43,9 +43,7 @@ var inputKeys = inputKeyMap{
 }
 
 // printWelcomeBanner displays the small logo icon and startup info.
-func printWelcomeBanner(model, reasoning string) {
-	t := ActiveTheme()
-
+func printWelcomeBanner(t *Theme, model, reasoning string) {
 	icon := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
 	name := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
 	dim := lipgloss.NewStyle().Foreground(t.Dim)
@@ -70,9 +68,7 @@ func printWelcomeBanner(model, reasoning string) {
 }
 
 // printHelp displays available commands and skills.
-func printHelp(w io.Writer, skillMgr *skills.Manager) {
-	t := ActiveTheme()
-
+func printHelp(w io.Writer, t *Theme, skillMgr skills.SkillProvider) {
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(t.Primary)

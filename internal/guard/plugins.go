@@ -2,15 +2,13 @@ package guard
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/sazid/bitcode/internal/plugin"
 	"gopkg.in/yaml.v3"
 )
-
-var pluginDirs = []string{".agents", ".claude", ".bitcode"}
 
 // pluginFrontmatter represents the structure of a guard plugin file.
 type pluginFrontmatter struct {
@@ -85,19 +83,12 @@ func (r *PluginRule) Evaluate(ctx *EvalContext) *Decision {
 func LoadPlugins() []Rule {
 	seen := make(map[string]*PluginRule)
 
-	home, _ := os.UserHomeDir()
-	wd, _ := os.Getwd()
-
-	// User-level (lower precedence)
-	if home != "" {
-		for _, d := range pluginDirs {
-			loadGuardPluginDir(filepath.Join(home, d, "guards"), seen)
+	for _, raw := range plugin.LoadFiles("guards") {
+		rule, ok := convertRawToGuardRule(raw)
+		if !ok {
+			continue
 		}
-	}
-
-	// Project-level (higher precedence)
-	for _, d := range pluginDirs {
-		loadGuardPluginDir(filepath.Join(wd, d, "guards"), seen)
+		seen[rule.id] = rule
 	}
 
 	rules := make([]Rule, 0, len(seen))
@@ -107,51 +98,26 @@ func LoadPlugins() []Rule {
 	return rules
 }
 
-func loadGuardPluginDir(dir string, seen map[string]*PluginRule) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		ext := filepath.Ext(name)
-		if ext != ".md" && ext != ".yaml" && ext != ".yml" {
-			continue
-		}
-
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			continue
-		}
-
-		rule, ok := parseGuardPlugin(string(data), ext, name)
-		if !ok {
-			continue
-		}
-
-		seen[rule.id] = rule
-	}
-}
-
-func parseGuardPlugin(content, ext, filename string) (*PluginRule, bool) {
+func convertRawToGuardRule(raw plugin.RawPlugin) (*PluginRule, bool) {
 	var fm pluginFrontmatter
 
-	if ext == ".yaml" || ext == ".yml" {
-		if err := yaml.Unmarshal([]byte(content), &fm); err != nil {
-			return nil, false
+	if raw.Metadata != nil {
+		// Convert generic metadata map to typed struct via YAML roundtrip
+		yamlBytes, err := yaml.Marshal(raw.Metadata)
+		if err == nil {
+			yaml.Unmarshal(yamlBytes, &fm)
 		}
-	} else {
-		// Markdown with frontmatter
-		fm = parseGuardMarkdownFrontmatter(content)
+	}
+
+	// Parse patterns from body if not found in frontmatter (MD files only)
+	if len(fm.Patterns) == 0 && raw.Body != "" {
+		yaml.Unmarshal([]byte(raw.Body), &struct {
+			Patterns *[]pluginMatch `yaml:"patterns"`
+		}{Patterns: &fm.Patterns})
 	}
 
 	if fm.ID == "" {
-		fm.ID = strings.TrimSuffix(filename, ext)
+		fm.ID = raw.ID
 	}
 
 	if len(fm.Patterns) == 0 {
@@ -191,34 +157,4 @@ func parseGuardPlugin(content, ext, filename string) (*PluginRule, bool) {
 		tools:    tools,
 		patterns: compiled,
 	}, true
-}
-
-func parseGuardMarkdownFrontmatter(content string) pluginFrontmatter {
-	if !strings.HasPrefix(content, "---\n") && !strings.HasPrefix(content, "---\r\n") {
-		return pluginFrontmatter{}
-	}
-
-	rest := content[4:]
-	idx := strings.Index(rest, "\n---")
-	if idx < 0 {
-		return pluginFrontmatter{}
-	}
-
-	yamlBlock := rest[:idx]
-	var fm pluginFrontmatter
-	if err := yaml.Unmarshal([]byte(yamlBlock), &fm); err != nil {
-		return pluginFrontmatter{}
-	}
-
-	// Parse patterns from the body if not in frontmatter
-	if len(fm.Patterns) == 0 {
-		body := rest[idx+4:]
-		if err := yaml.Unmarshal([]byte(body), &struct {
-			Patterns *[]pluginMatch `yaml:"patterns"`
-		}{Patterns: &fm.Patterns}); err != nil {
-			// Patterns might be in frontmatter already
-		}
-	}
-
-	return fm
 }

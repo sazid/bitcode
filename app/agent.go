@@ -20,10 +20,10 @@ type AgentConfig struct {
 	Model            string
 	Reasoning        string
 	MaxTurns         int
-	ToolManager      *tools.Manager
-	SkillManager     *skills.Manager
-	ReminderMgr      *reminder.Manager
-	GuardMgr         *guard.Manager
+	ToolManager      tools.ToolRegistry
+	SkillManager     skills.SkillProvider
+	ReminderMgr      reminder.ReminderEvaluator
+	GuardMgr         guard.GuardEvaluator
 	TodoStore        tools.TodoStore
 	TaskTitle        string      // Current task title for notifications
 	InstructionFiles []string    // Discovered CLAUDE.md/AGENTS.md relative paths

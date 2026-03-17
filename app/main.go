@@ -56,6 +56,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Theme registry
+	themes := DefaultThemeRegistry()
+
 	toolManager := tools.NewManager()
 	toolManager.Register(&tools.ReadTool{})
 	toolManager.Register(&tools.WriteTool{})
@@ -187,9 +190,8 @@ func main() {
 	if isNonInteractive {
 		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
 	}
-	// Interactive permission handler is set in runInteractive
 
-	config := &AgentConfig{
+	agentConfig := &AgentConfig{
 		Provider:         llm.NewOpenAIProvider(apiKey, baseUrl),
 		Model:            model,
 		Reasoning:        reasoningEffort,
@@ -203,9 +205,9 @@ func main() {
 	}
 
 	if prompt != "" {
-		runSingleShot(config, prompt)
+		runSingleShot(agentConfig, themes, prompt)
 	} else {
-		runInteractive(config)
+		runInteractive(agentConfig, themes)
 	}
 }
 
@@ -216,7 +218,7 @@ func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
 	return messages, toolDefsFromManager(config.ToolManager)
 }
 
-func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
+func toolDefsFromManager(m tools.ToolRegistry) []llm.ToolDef {
 	var defs []llm.ToolDef
 	for _, d := range m.ToolDefinitions() {
 		defs = append(defs, llm.ToolDef{
@@ -228,11 +230,11 @@ func toolDefsFromManager(m *tools.Manager) []llm.ToolDef {
 	return defs
 }
 
-func singleShotCallbacks(todoStore tools.TodoStore) AgentCallbacks {
+func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore) AgentCallbacks {
 	var spin *Spinner
 	return AgentCallbacks{
 		OnContent: func(content string) {
-			renderMarkdown(os.Stderr, content)
+			renderMarkdown(os.Stderr, themes.Active(), content)
 		},
 		OnThinking: func(active bool) {
 			if active {
@@ -240,24 +242,24 @@ func singleShotCallbacks(todoStore tools.TodoStore) AgentCallbacks {
 				if todoStore != nil {
 					todos = todoStore.Get()
 				}
-				spin = StartSpinner(os.Stderr, todos)
+				spin = StartSpinner(os.Stderr, themes.Active(), todos)
 			} else if spin != nil {
 				spin.Stop()
 				spin = nil
 			}
 		},
 		OnEvent: func(e internal.Event) {
-			renderEvent(os.Stderr, e)
+			renderEvent(os.Stderr, themes.Active(), e)
 		},
 		OnError: func(err error) {
-			t := ActiveTheme()
+			t := themes.Active()
 			fmt.Fprintf(os.Stderr, "%sError: %v%s\n", t.ANSI(t.Error), err, t.ANSIReset())
 		},
 	}
 }
 
 // runSingleShot runs a single prompt through the agent loop and exits.
-func runSingleShot(config *AgentConfig, prompt string) {
+func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
 	config.TaskTitle = prompt
 
 	messages, toolDefs := newConversation(config)
@@ -273,25 +275,40 @@ func runSingleShot(config *AgentConfig, prompt string) {
 		cancel()
 	}()
 
-	runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(config.TodoStore))
+	runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(themes, config.TodoStore))
 
 	title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
 	notify.Send(title, "Finished working")
 }
 
 // runInteractive runs the interactive REPL mode with a persistent TUI.
-func runInteractive(config *AgentConfig) {
-	printWelcomeBanner(config.Model, config.Reasoning)
+func runInteractive(config *AgentConfig, themes *ThemeRegistry) {
+	printWelcomeBanner(themes.Active(), config.Model, config.Reasoning)
 
 	// Build slash command list for autocomplete
 	slashCommands := buildSlashCommands(config)
 	submitCh := make(chan InputResult, 1)
 
-	model := newSessionModel(config, slashCommands, submitCh)
+	model := newSessionModel(config, themes, slashCommands, submitCh)
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
+	// Set up interactive permission handler (needs the tea.Program reference)
+	if gm, ok := config.GuardMgr.(*guard.Manager); ok {
+		gm.SetPermissionHandler(func(toolName string, decision guard.Decision) guard.PermissionResult {
+			title := "BitCode"
+			if t := config.TaskTitle; t != "" {
+				title = "BitCode: " + notify.Truncate(t, 40)
+			}
+			notify.Send(title, "Approval needed for "+toolName)
+
+			responseCh := make(chan guard.PermissionResult, 1)
+			p.Send(permRequestMsg{toolName: toolName, decision: decision, responseCh: responseCh})
+			return <-responseCh
+		})
+	}
+
 	// Orchestrator goroutine manages agent lifecycle
-	go runOrchestrator(p, config, submitCh)
+	go runOrchestrator(p, config, themes, submitCh)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -329,7 +346,7 @@ func buildInstructionFilesReminderContent(files []string) string {
 }
 
 // buildSkillReminderContent creates reminder content listing available skills.
-func buildSkillReminderContent(sm *skills.Manager) string {
+func buildSkillReminderContent(sm skills.SkillProvider) string {
 	skillList := sm.List()
 	if len(skillList) == 0 {
 		return ""

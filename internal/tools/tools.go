@@ -7,6 +7,12 @@ import (
 	"github.com/sazid/bitcode/internal"
 )
 
+// ToolRegistry is the interface for executing tools and retrieving definitions.
+type ToolRegistry interface {
+	ExecuteTool(toolName string, input string, eventsCh chan<- internal.Event) (ToolResult, error)
+	ToolDefinitions() []ToolDefinition
+}
+
 type Manager struct {
 	tools map[string]Tool
 }

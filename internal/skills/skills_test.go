@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+
+	"github.com/sazid/bitcode/internal/plugin"
 )
 
 func TestParseFrontmatter(t *testing.T) {
 	t.Run("with valid frontmatter", func(t *testing.T) {
 		content := "---\nname: deploy\ndescription: Deploy the app\ntrigger: When the user asks to deploy\n---\nDo the deployment."
-		fm, body := parseFrontmatter(content)
+		fm, body := plugin.ParseFrontmatter(content)
 
 		if fm["name"] != "deploy" {
 			t.Errorf("expected name 'deploy', got %q", fm["name"])
@@ -28,7 +30,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 	t.Run("without frontmatter", func(t *testing.T) {
 		content := "# Simple Skill\nJust a prompt."
-		fm, body := parseFrontmatter(content)
+		fm, body := plugin.ParseFrontmatter(content)
 
 		if fm != nil {
 			t.Errorf("expected nil frontmatter, got %+v", fm)
@@ -40,7 +42,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 	t.Run("malformed YAML", func(t *testing.T) {
 		content := "---\n: invalid: yaml: [broken\n---\nBody here."
-		fm, body := parseFrontmatter(content)
+		fm, body := plugin.ParseFrontmatter(content)
 
 		if fm != nil {
 			t.Errorf("expected nil frontmatter on malformed YAML, got %+v", fm)
@@ -52,7 +54,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 	t.Run("no closing delimiter", func(t *testing.T) {
 		content := "---\nname: test\nThis is not closed."
-		fm, body := parseFrontmatter(content)
+		fm, body := plugin.ParseFrontmatter(content)
 
 		if fm != nil {
 			t.Errorf("expected nil frontmatter, got %+v", fm)
@@ -64,7 +66,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 	t.Run("partial frontmatter fields", func(t *testing.T) {
 		content := "---\ndescription: Only a description\n---\nBody."
-		fm, body := parseFrontmatter(content)
+		fm, body := plugin.ParseFrontmatter(content)
 
 		if fm["name"] != nil {
 			t.Errorf("expected empty name, got %q", fm["name"])
@@ -79,7 +81,7 @@ func TestParseFrontmatter(t *testing.T) {
 
 	t.Run("extra metadata fields", func(t *testing.T) {
 		content := "---\nname: bash-guard\nlanguage: bash\nauto_invoke: true\n---\nBody."
-		fm, _ := parseFrontmatter(content)
+		fm, _ := plugin.ParseFrontmatter(content)
 
 		if fm["language"] != "bash" {
 			t.Errorf("expected language 'bash', got %q", fm["language"])

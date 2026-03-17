@@ -27,7 +27,7 @@ func formatInstructionFilePaths(files []string) string {
 	return sb.String()
 }
 
-func buildSystemPrompt(skillManager *skills.Manager, instructionFiles []string) string {
+func buildSystemPrompt(skillManager skills.SkillProvider, instructionFiles []string) string {
 	wd, _ := os.Getwd()
 	shell := os.Getenv("SHELL")
 	if shell == "" {

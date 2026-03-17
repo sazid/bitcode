@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sazid/bitcode/internal/plugin"
 )
 
 // InstructionFiles holds discovered CLAUDE.md and AGENTS.md file paths.
@@ -48,8 +50,6 @@ var defaultIgnoreDirs = map[string]bool{
 	".cache":        true,
 }
 
-// configDirs are the directories to check inside the home directory.
-var configDirs = []string{".agents", ".claude", ".bitcode"}
 
 // DiscoverInstructionFiles finds all CLAUDE.md and AGENTS.md files in projectDir
 // and user-level config directories.
@@ -68,7 +68,7 @@ func DiscoverInstructionFiles(projectDir string) InstructionFiles {
 	// User-level: check known config dirs (non-recursive, top-level only)
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
-		for _, dir := range configDirs {
+		for _, dir := range plugin.BaseDirs {
 			for name := range instructionFileNames {
 				rel := filepath.Join(dir, name)
 				abs := filepath.Join(home, rel)

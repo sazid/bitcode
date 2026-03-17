@@ -9,12 +9,11 @@ import (
 
 // RenderTodoStatus renders the todo list status in a consistent style.
 // Returns empty string if no todos exist.
-func RenderTodoStatus(todos []tools.TodoItem) string {
+func RenderTodoStatus(t *Theme, todos []tools.TodoItem) string {
 	if len(todos) == 0 {
 		return ""
 	}
 
-	t := ActiveTheme()
 	completed := 0
 	var activeContent string
 	for _, td := range todos {

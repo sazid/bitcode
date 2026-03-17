@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// ReminderEvaluator is the interface for evaluating and registering reminders.
+type ReminderEvaluator interface {
+	Evaluate(state *ConversationState) []Reminder
+	Register(r Reminder)
+}
+
 // Manager collects reminders from all sources and evaluates which to fire.
 type Manager struct {
 	mu         sync.RWMutex

@@ -51,47 +51,55 @@ func (t *Theme) ANSIReset() string {
 	return "\033[0m"
 }
 
-var (
-	themeMu    sync.RWMutex
-	active     *Theme
-	themeStore = map[string]*Theme{}
-)
+// ThemeRegistry manages registered themes and tracks the active theme.
+type ThemeRegistry struct {
+	mu     sync.RWMutex
+	active *Theme
+	store  map[string]*Theme
+}
 
-// RegisterTheme adds a theme to the registry.
-func RegisterTheme(t *Theme) {
-	themeMu.Lock()
-	defer themeMu.Unlock()
-	themeStore[t.Name] = t
-	if active == nil {
-		active = t
+// NewThemeRegistry creates an empty ThemeRegistry.
+func NewThemeRegistry() *ThemeRegistry {
+	return &ThemeRegistry{
+		store: make(map[string]*Theme),
 	}
 }
 
-// ActiveTheme returns the current active theme.
-func ActiveTheme() *Theme {
-	themeMu.RLock()
-	defer themeMu.RUnlock()
-	return active
+// Register adds a theme to the registry. The first registered theme becomes active.
+func (r *ThemeRegistry) Register(t *Theme) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.store[t.Name] = t
+	if r.active == nil {
+		r.active = t
+	}
 }
 
-// SetTheme switches the active theme by name. Returns false if not found.
-func SetTheme(name string) bool {
-	themeMu.Lock()
-	defer themeMu.Unlock()
-	t, ok := themeStore[name]
+// Active returns the current active theme.
+func (r *ThemeRegistry) Active() *Theme {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.active
+}
+
+// Set switches the active theme by name. Returns false if not found.
+func (r *ThemeRegistry) Set(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.store[name]
 	if !ok {
 		return false
 	}
-	active = t
+	r.active = t
 	return true
 }
 
-// ThemeNames returns a sorted list of registered theme names.
-func ThemeNames() []string {
-	themeMu.RLock()
-	defer themeMu.RUnlock()
-	names := make([]string, 0, len(themeStore))
-	for n := range themeStore {
+// Names returns a sorted list of registered theme names.
+func (r *ThemeRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.store))
+	for n := range r.store {
 		names = append(names, n)
 	}
 	sort.Strings(names)

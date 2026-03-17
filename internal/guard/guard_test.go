@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/sazid/bitcode/internal/plugin"
+	"gopkg.in/yaml.v3"
 )
 
 func wd() string {
@@ -354,7 +357,7 @@ func TestParseLLMResponse(t *testing.T) {
 // --- Plugin parsing ---
 
 func TestParseGuardPlugin_YAML(t *testing.T) {
-	yaml := `
+	content := `
 id: block-docker
 tool: Bash
 patterns:
@@ -362,7 +365,17 @@ patterns:
     verdict: ask
     reason: "Docker commands require approval"
 `
-	rule, ok := parseGuardPlugin(yaml, ".yaml", "block-docker.yaml")
+	var metadata map[string]any
+	yaml.Unmarshal([]byte(content), &metadata)
+
+	raw := plugin.RawPlugin{
+		ID:       "block-docker",
+		Body:     "",
+		Source:   "project",
+		Metadata: metadata,
+	}
+
+	rule, ok := convertRawToGuardRule(raw)
 	if !ok {
 		t.Fatal("expected successful parse")
 	}

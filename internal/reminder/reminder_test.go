@@ -1,12 +1,12 @@
 package reminder
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/plugin"
+	"gopkg.in/yaml.v3"
 )
 
 func TestEvaluate_Always(t *testing.T) {
@@ -388,20 +388,19 @@ func TestParseConditionString(t *testing.T) {
 }
 
 func TestLoadPlugins_Markdown(t *testing.T) {
-	dir := t.TempDir()
-	remindersDir := filepath.Join(dir, ".bitcode", "reminders")
-	os.MkdirAll(remindersDir, 0o755)
-
 	content := "---\nid: test-plugin\nschedule:\n  kind: always\npriority: 5\n---\nRemember to test everything."
-	os.WriteFile(filepath.Join(remindersDir, "test.md"), []byte(content), 0o644)
+	metadata, body := plugin.ParseFrontmatter(content)
 
-	// Load directly from directory
-	seen := make(map[string]Reminder)
-	loadPluginDir(remindersDir, seen)
+	raw := plugin.RawPlugin{
+		ID:       "test-plugin",
+		Body:     body,
+		Source:   "project",
+		Metadata: metadata,
+	}
 
-	r, ok := seen["test-plugin"]
+	r, ok := convertRawToReminder(raw)
 	if !ok {
-		t.Fatal("expected 'test-plugin' reminder")
+		t.Fatal("expected successful conversion")
 	}
 	if r.Content != "Remember to test everything." {
 		t.Errorf("unexpected content: %q", r.Content)
@@ -418,17 +417,20 @@ func TestLoadPlugins_Markdown(t *testing.T) {
 }
 
 func TestLoadPlugins_YAML(t *testing.T) {
-	dir := t.TempDir()
-
 	content := "id: yaml-plugin\ncontent: YAML content here.\nschedule:\n  kind: turn\n  turn_interval: 5\npriority: 2\n"
-	os.WriteFile(filepath.Join(dir, "nudge.yaml"), []byte(content), 0o644)
+	var metadata map[string]any
+	yaml.Unmarshal([]byte(content), &metadata)
 
-	seen := make(map[string]Reminder)
-	loadPluginDir(dir, seen)
+	raw := plugin.RawPlugin{
+		ID:       "yaml-plugin",
+		Body:     "",
+		Source:   "project",
+		Metadata: metadata,
+	}
 
-	r, ok := seen["yaml-plugin"]
+	r, ok := convertRawToReminder(raw)
 	if !ok {
-		t.Fatal("expected 'yaml-plugin' reminder")
+		t.Fatal("expected successful conversion")
 	}
 	if r.Content != "YAML content here." {
 		t.Errorf("unexpected content: %q", r.Content)
@@ -442,31 +444,38 @@ func TestLoadPlugins_YAML(t *testing.T) {
 }
 
 func TestLoadPlugins_IDFromFilename(t *testing.T) {
-	dir := t.TempDir()
-
-	// No id in frontmatter — should derive from filename
 	content := "---\nschedule:\n  kind: oneshot\n---\nContent without explicit ID."
-	os.WriteFile(filepath.Join(dir, "my-reminder.md"), []byte(content), 0o644)
+	metadata, body := plugin.ParseFrontmatter(content)
 
-	seen := make(map[string]Reminder)
-	loadPluginDir(dir, seen)
+	// ID derived from filename (simulating what LoadFiles does)
+	raw := plugin.RawPlugin{
+		ID:       "my-reminder",
+		Body:     body,
+		Source:   "project",
+		Metadata: metadata,
+	}
 
-	if _, ok := seen["my-reminder"]; !ok {
-		t.Error("expected ID derived from filename 'my-reminder'")
+	r, ok := convertRawToReminder(raw)
+	if !ok {
+		t.Fatal("expected successful conversion")
+	}
+	if r.ID != "my-reminder" {
+		t.Errorf("expected ID 'my-reminder', got %q", r.ID)
 	}
 }
 
-func TestLoadPlugins_IgnoresNonPluginFiles(t *testing.T) {
-	dir := t.TempDir()
+func TestConvertRawToReminder_EmptyContent(t *testing.T) {
+	// RawPlugin with no body and no content in metadata should fail conversion
+	raw := plugin.RawPlugin{
+		ID:       "empty",
+		Body:     "",
+		Source:   "project",
+		Metadata: nil,
+	}
 
-	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not a plugin"), 0o644)
-	os.WriteFile(filepath.Join(dir, "notes.json"), []byte("{}"), 0o644)
-
-	seen := make(map[string]Reminder)
-	loadPluginDir(dir, seen)
-
-	if len(seen) != 0 {
-		t.Errorf("expected 0 plugins from non-plugin files, got %d", len(seen))
+	_, ok := convertRawToReminder(raw)
+	if ok {
+		t.Error("expected conversion to fail for empty content")
 	}
 }
 

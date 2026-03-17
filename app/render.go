@@ -33,8 +33,8 @@ var spinnerMessages = []string{
 }
 
 // renderMarkdown renders markdown text for terminal output using glamour.
-func renderMarkdown(w io.Writer, text string) {
-	rendered, err := glamour.Render(text, ActiveTheme().GlamourStyle)
+func renderMarkdown(w io.Writer, t *Theme, text string) {
+	rendered, err := glamour.Render(text, t.GlamourStyle)
 	if err != nil {
 		fmt.Fprintln(w, text)
 		return
@@ -58,7 +58,7 @@ func randomBinary(n int) string {
 	return string(b)
 }
 
-func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
+func StartSpinner(w io.Writer, t *Theme, todos []tools.TodoItem) *Spinner {
 	s := &Spinner{w: w, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(s.done)
@@ -69,7 +69,7 @@ func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 		nextSwap := 40 + rand.Intn(30) // swap message every ~3-5s
 
 		// Print todo status once at the start
-		if ts := RenderTodoStatus(todos); ts != "" {
+		if ts := RenderTodoStatus(t, todos); ts != "" {
 			fmt.Fprintf(w, "%s", ts)
 		}
 
@@ -83,7 +83,6 @@ func StartSpinner(w io.Writer, todos []tools.TodoItem) *Spinner {
 					msg = spinnerMessages[rand.Intn(len(spinnerMessages))]
 					nextSwap = i + 40 + rand.Intn(30)
 				}
-				t := ActiveTheme()
 				bits := randomBinary(6)
 				fmt.Fprintf(w, "\r\033[K  %s%s%s %s%s%s", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), msg, t.ANSIReset())
 				i++
@@ -98,22 +97,21 @@ func (s *Spinner) Stop() {
 	<-s.done
 }
 
-// coloredBullet returns ⏺ in green (success) or red (error).
-func coloredBullet(isError bool) string {
-	t := ActiveTheme()
+// coloredBullet returns a bullet in green (success) or red (error).
+func coloredBullet(t *Theme, isError bool) string {
 	if isError {
 		return t.ANSI(t.Error) + "⏺" + t.ANSIReset()
 	}
 	return t.ANSI(t.Success) + "⏺" + t.ANSIReset()
 }
 
-func renderEvent(w io.Writer, e internal.Event) {
+func renderEvent(w io.Writer, t *Theme, e internal.Event) {
 	if e.PreviewType == internal.PreviewGuard {
-		renderGuardEvent(w, e)
+		renderGuardEvent(w, t, e)
 		return
 	}
 	if e.PreviewType == internal.PreviewBash {
-		renderBashEvent(w, e)
+		renderBashEvent(w, t, e)
 		return
 	}
 
@@ -121,16 +119,15 @@ func renderEvent(w io.Writer, e internal.Event) {
 	if len(args) > 0 {
 		args = fmt.Sprintf("(%s)", args)
 	}
-	fmt.Fprintf(w, "\n%s %s%s\n", coloredBullet(e.IsError), e.Name, args)
+	fmt.Fprintf(w, "\n%s %s%s\n", coloredBullet(t, e.IsError), e.Name, args)
 	fmt.Fprintf(w, "⎿  %s\n", e.Message)
 
 	for _, line := range e.Preview {
-		fmt.Fprintf(w, "   %s\n", renderPreviewLine(e.PreviewType, line))
+		fmt.Fprintf(w, "   %s\n", renderPreviewLine(t, e.PreviewType, line))
 	}
 }
 
-func renderGuardEvent(w io.Writer, e internal.Event) {
-	t := ActiveTheme()
+func renderGuardEvent(w io.Writer, t *Theme, e internal.Event) {
 	tool := ""
 	if len(e.Args) > 0 {
 		tool = e.Args[0]
@@ -139,8 +136,7 @@ func renderGuardEvent(w io.Writer, e internal.Event) {
 	fmt.Fprintf(w, "⎿  %s%s%s\n", t.ANSI(t.Warning), e.Message, t.ANSIReset())
 }
 
-func renderBashEvent(w io.Writer, e internal.Event) {
-	t := ActiveTheme()
+func renderBashEvent(w io.Writer, t *Theme, e internal.Event) {
 	description := ""
 	command := ""
 	if len(e.Args) > 0 {
@@ -151,20 +147,19 @@ func renderBashEvent(w io.Writer, e internal.Event) {
 	}
 
 	if description != "" {
-		fmt.Fprintf(w, "\n%s %s(%s)\n", coloredBullet(e.IsError), e.Name, description)
+		fmt.Fprintf(w, "\n%s %s(%s)\n", coloredBullet(t, e.IsError), e.Name, description)
 	} else {
-		fmt.Fprintf(w, "\n%s %s\n", coloredBullet(e.IsError), e.Name)
+		fmt.Fprintf(w, "\n%s %s\n", coloredBullet(t, e.IsError), e.Name)
 	}
 	fmt.Fprintf(w, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
 	fmt.Fprintf(w, "⎿  %s\n", e.Message)
 
 	for _, line := range e.Preview {
-		fmt.Fprintf(w, "   %s\n", renderPreviewLine(e.PreviewType, line))
+		fmt.Fprintf(w, "   %s\n", renderPreviewLine(t, e.PreviewType, line))
 	}
 }
 
-func renderPreviewLine(pt internal.PreviewType, line string) string {
-	t := ActiveTheme()
+func renderPreviewLine(t *Theme, pt internal.PreviewType, line string) string {
 	switch pt {
 	case internal.PreviewDiff:
 		if strings.HasPrefix(line, "+") {
