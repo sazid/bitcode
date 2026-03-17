@@ -184,19 +184,35 @@ func (t *TodoWriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.
 		}
 	}
 
+	// Check if all todos are completed
+	allCompleted := len(params.Todos) > 0
+	completed := 0
+	for _, item := range params.Todos {
+		if item.Status == "completed" {
+			completed++
+		} else {
+			allCompleted = false
+		}
+	}
+
+	// If all completed, clear the list
+	if allCompleted {
+		t.Store.Clear()
+		eventsCh <- internal.Event{
+			Name:        t.Name(),
+			Message:     "All todos completed - cleared",
+			Preview:     []string{"All tasks completed!"},
+			PreviewType: internal.PreviewPlain,
+		}
+		return ToolResult{Content: "All todos completed. List cleared."}, nil
+	}
+
 	t.Store.Set(params.Todos)
 
 	lines := formatTodos(params.Todos)
 	preview := lines
 	if len(preview) > 6 {
 		preview = append(lines[:6], fmt.Sprintf("... and %d more", len(lines)-6))
-	}
-
-	completed := 0
-	for _, item := range params.Todos {
-		if item.Status == "completed" {
-			completed++
-		}
 	}
 
 	eventsCh <- internal.Event{
