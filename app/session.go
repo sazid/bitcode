@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -26,10 +28,50 @@ type agentThinkingMsg struct{ active bool }
 type agentDoneMsg struct{}
 type agentStartMsg struct{ cancel context.CancelFunc }
 type spinnerTickMsg time.Time
+type appendOutputMsg string
+type flushOutputMsg struct{}
 type permRequestMsg struct {
 	toolName   string
 	decision   guard.Decision
 	responseCh chan guard.PermissionResult
+}
+
+// --- outputExec implements tea.ExecCommand to write text with the renderer fully stopped ---
+
+type outputExec struct {
+	text       string
+	viewHeight int // how many view lines to clear before writing
+	w          io.Writer
+}
+
+func (o *outputExec) Run() error {
+	// Move cursor up to the top of the view area and erase it
+	if o.viewHeight > 1 {
+		fmt.Fprintf(o.w, "\033[%dA", o.viewHeight-1)
+	}
+	for i := 0; i < o.viewHeight; i++ {
+		fmt.Fprint(o.w, "\033[2K") // erase entire line
+		if i < o.viewHeight-1 {
+			fmt.Fprint(o.w, "\n") // move to next line
+		}
+	}
+	// Move back to top of cleared area
+	if o.viewHeight > 1 {
+		fmt.Fprintf(o.w, "\033[%dA", o.viewHeight-1)
+	}
+	fmt.Fprint(o.w, "\r")
+
+	// Write the output text — this goes into the terminal scrollback
+	fmt.Fprintln(o.w, o.text)
+	return nil
+}
+
+func (o *outputExec) SetStdin(io.Reader)    {}
+func (o *outputExec) SetStdout(w io.Writer) { o.w = w }
+func (o *outputExec) SetStderr(w io.Writer) {
+	if o.w == nil {
+		o.w = w
+	}
 }
 
 // --- Session states ---
@@ -61,6 +103,10 @@ type sessionModel struct {
 	spinnerFrame   int
 	spinnerMsg     string
 
+	// Output queue: batch output and flush via tea.Exec
+	outputQueue    []string
+	outputFlushing bool
+
 	// Autocomplete
 	commands    []SlashCommand
 	suggestions []SlashCommand
@@ -80,6 +126,7 @@ type sessionModel struct {
 	todoStore   tools.TodoStore
 
 	width    int // terminal width from WindowSizeMsg
+	height   int // terminal height from WindowSizeMsg
 	quitting bool
 }
 
@@ -126,6 +173,11 @@ func (m sessionModel) Init() tea.Cmd {
 	return textarea.Blink
 }
 
+// viewHeight returns how many terminal lines the current View() occupies.
+func (m sessionModel) viewHeight() int {
+	return strings.Count(m.View(), "\n") + 1
+}
+
 func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle permission prompt state
 	if m.state == sessionPermissionPrompt {
@@ -167,6 +219,26 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
 		}
 		return m, m.tickSpinner()
+
+	case appendOutputMsg:
+		m.outputQueue = append(m.outputQueue, string(msg))
+		if !m.outputFlushing {
+			m.outputFlushing = true
+			return m, func() tea.Msg { return flushOutputMsg{} }
+		}
+		return m, nil
+
+	case flushOutputMsg:
+		if len(m.outputQueue) == 0 {
+			m.outputFlushing = false
+			return m, nil
+		}
+		combined := strings.Join(m.outputQueue, "\n")
+		m.outputQueue = nil
+		vh := m.viewHeight()
+		return m, tea.Exec(&outputExec{text: combined, viewHeight: vh, w: os.Stderr}, func(err error) tea.Msg {
+			return flushOutputMsg{}
+		})
 
 	case permRequestMsg:
 		m.state = sessionPermissionPrompt
@@ -260,7 +332,8 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.textarea.SetWidth(msg.Width - 1) // 1 char left margin in View
+		m.height = msg.Height
+		m.textarea.SetWidth(msg.Width - 1)
 	}
 
 	// Pre-grow textarea before processing keystroke
@@ -408,7 +481,6 @@ func (m sessionModel) renderPermissionPrompt() string {
 
 func (m *sessionModel) resizeTextarea() {
 	visLines := 0
-	// Subtract prompt display width (❯ + space = 2 columns) for wrapping calc
 	textWidth := m.textarea.Width() - 2
 	if textWidth <= 0 {
 		textWidth = 1
@@ -509,35 +581,32 @@ func (m sessionModel) tickSpinner() tea.Cmd {
 	})
 }
 
-// --- programWriter adapts p.Println for use as io.Writer ---
-
-type programWriter struct{ p *tea.Program }
-
-func (pw *programWriter) Write(b []byte) (int, error) {
-	text := strings.TrimRight(string(b), "\n")
-	if text != "" {
-		pw.p.Println(text)
-	}
-	return len(b), nil
-}
-
 // --- Session callbacks for the agent loop ---
 
 func sessionCallbacks(p *tea.Program, config *AgentConfig) AgentCallbacks {
-	pw := &programWriter{p: p}
 	return AgentCallbacks{
 		OnContent: func(content string) {
-			renderMarkdown(pw, content)
+			var buf strings.Builder
+			renderMarkdown(&buf, content)
+			text := strings.TrimRight(buf.String(), "\n")
+			if text != "" {
+				p.Send(appendOutputMsg(text))
+			}
 		},
 		OnThinking: func(active bool) {
 			p.Send(agentThinkingMsg{active: active})
 		},
 		OnEvent: func(e internal.Event) {
-			renderEvent(pw, e)
+			var buf strings.Builder
+			renderEvent(&buf, e)
+			text := strings.TrimRight(buf.String(), "\n")
+			if text != "" {
+				p.Send(appendOutputMsg(text))
+			}
 		},
 		OnError: func(err error) {
 			et := ActiveTheme()
-			p.Println(fmt.Sprintf("%sError: %v%s", et.ANSI(et.Error), err, et.ANSIReset()))
+			p.Send(appendOutputMsg(fmt.Sprintf("%sError: %v%s", et.ANSI(et.Error), err, et.ANSIReset())))
 		},
 	}
 }
@@ -552,13 +621,11 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 	injectedMessages := make(chan string, 8)
 	config.InjectedMessages = injectedMessages
 
-	// Styles (closures capture ActiveTheme at render time)
 	successStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Success) }
 	dimStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Dim) }
 	errorStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Error) }
 	skillStyle := func() lipgloss.Style { return lipgloss.NewStyle().Foreground(ActiveTheme().Secondary) }
 
-	// Wire permission handler to route through the TUI
 	if config.GuardMgr != nil {
 		config.GuardMgr.SetPermissionHandler(func(toolName string, decision guard.Decision) guard.PermissionResult {
 			title := "BitCode"
@@ -577,18 +644,15 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 		select {
 		case result, ok := <-submitCh:
 			if !ok {
-				// Channel closed (ctrl+d)
 				return
 			}
 
-			// Check if agent just finished (avoid stale agentRunning state)
 			select {
 			case <-agentDoneCh:
 				agentRunning = false
 			default:
 			}
 
-			// Handle slash commands
 			text := ""
 			if result.Command != "" {
 				cmdParts := strings.SplitN(result.Command, " ", 2)
@@ -605,25 +669,29 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 					return
 				case "/new":
 					if agentRunning {
-						p.Println(errorStyle().Render("\n  Cannot start new conversation while agent is running. Press Ctrl+C first."))
+						p.Send(appendOutputMsg(errorStyle().Render("\n  Cannot start new conversation while agent is running. Press Ctrl+C first.")))
 					} else {
 						config.TodoStore.Clear()
 						messages, toolDefs = newConversation(config)
-						p.Println(successStyle().Render("\n  \u2713 Started new conversation"))
+						p.Send(appendOutputMsg(successStyle().Render("\n  \u2713 Started new conversation")))
 					}
 				case "/help":
-					pw := &programWriter{p: p}
-					printHelp(pw, config.SkillManager)
+					var buf strings.Builder
+					printHelp(&buf, config.SkillManager)
+					text := strings.TrimRight(buf.String(), "\n")
+					if text != "" {
+						p.Send(appendOutputMsg(text))
+					}
 				case "/turns":
 					if cmdArgs == "" {
-						p.Println(dimStyle().Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns)))
+						p.Send(appendOutputMsg(dimStyle().Render(fmt.Sprintf("\n  Current max turns: %d", config.MaxTurns))))
 					} else {
 						var n int
 						if _, err := fmt.Sscan(cmdArgs, &n); err != nil || n <= 0 {
-							p.Println(errorStyle().Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs)))
+							p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Invalid value: %s (must be a positive integer)", cmdArgs))))
 						} else {
 							config.MaxTurns = n
-							p.Println(successStyle().Render(fmt.Sprintf("\n  \u2713 Max turns set to %d", config.MaxTurns)))
+							p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Max turns set to %d", config.MaxTurns))))
 						}
 					}
 				case "/reasoning":
@@ -631,7 +699,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 					args := strings.ToLower(cmdArgs)
 					if args == "" || args == "default" || args == "clear" {
 						config.Reasoning = ""
-						p.Println(successStyle().Render("\n  \u2713 Reasoning effort reset to default"))
+						p.Send(appendOutputMsg(successStyle().Render("\n  \u2713 Reasoning effort reset to default")))
 					} else {
 						valid := false
 						for _, e := range validEfforts {
@@ -641,11 +709,11 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 							}
 						}
 						if !valid {
-							p.Println(errorStyle().Render(fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs)))
-							p.Println(dimStyle().Render("  Valid options: none, low, medium, high, xhigh, default"))
+							p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Invalid reasoning effort: %s", cmdArgs))))
+							p.Send(appendOutputMsg(dimStyle().Render("  Valid options: none, low, medium, high, xhigh, default")))
 						} else {
 							config.Reasoning = args
-							p.Println(successStyle().Render("\n  \u2713 Reasoning effort set to " + config.Reasoning))
+							p.Send(appendOutputMsg(successStyle().Render("\n  \u2713 Reasoning effort set to " + config.Reasoning)))
 						}
 					}
 				case "/theme":
@@ -660,25 +728,25 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 							}
 							listing.WriteString(fmt.Sprintf("    %s%s\n", marker, name))
 						}
-						p.Println(dimStyle().Render(listing.String()))
+						p.Send(appendOutputMsg(dimStyle().Render(listing.String())))
 					} else {
 						name := strings.ToLower(cmdArgs)
 						if SetTheme(name) {
-							p.Println(successStyle().Render(fmt.Sprintf("\n  \u2713 Theme set to %s", name)))
+							p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Theme set to %s", name))))
 						} else {
-							p.Println(errorStyle().Render(fmt.Sprintf("\n  Unknown theme: %s", cmdArgs)))
-							p.Println(dimStyle().Render("  Available: " + strings.Join(ThemeNames(), ", ")))
+							p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Unknown theme: %s", cmdArgs))))
+							p.Send(appendOutputMsg(dimStyle().Render("  Available: " + strings.Join(ThemeNames(), ", "))))
 						}
 					}
 				default:
 					skillName := strings.TrimPrefix(cmdName, "/")
 					if skill, ok := config.SkillManager.Get(skillName); ok {
 						text = skill.FormatPrompt(cmdArgs)
-						p.Println(fmt.Sprintf("\n%s %s", skillStyle().Render("\u26a1"), skill.Name))
+						p.Send(appendOutputMsg(fmt.Sprintf("\n%s %s", skillStyle().Render("\u26a1"), skill.Name)))
 						handled = false
 					} else {
-						p.Println(errorStyle().Render(fmt.Sprintf("\n  Unknown command: %s", cmdName)))
-						p.Println(dimStyle().Render("  Type /help for available commands"))
+						p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Unknown command: %s", cmdName))))
+						p.Send(appendOutputMsg(dimStyle().Render("  Type /help for available commands")))
 					}
 				}
 				if handled {
@@ -692,23 +760,20 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 				continue
 			}
 
-			// Show the user's message with a subtle background highlight
 			ut := ActiveTheme()
 			userMsgStyle := lipgloss.NewStyle().
 				Background(ut.UserMsgBg).
 				Bold(true).
 				Foreground(ut.Primary)
-			p.Println("\n" + userMsgStyle.Render(fmt.Sprintf(" > %s ", text)))
+			p.Send(appendOutputMsg("\n" + userMsgStyle.Render(fmt.Sprintf(" > %s ", text))))
 
 			if agentRunning {
-				// Inject message mid-flight
-				p.Println(dimStyle().Render("  (message will be delivered to the agent)"))
+				p.Send(appendOutputMsg(dimStyle().Render("  (message will be delivered to the agent)")))
 				select {
 				case injectedMessages <- text:
 				default:
 				}
 			} else {
-				// Start agent
 				config.TaskTitle = text
 				messages = append(messages, llm.TextMessage(llm.RoleUser, text))
 				agentRunning = true
@@ -720,7 +785,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, submitCh chan InputRes
 					defer func() {
 						if r := recover(); r != nil {
 							pt := ActiveTheme()
-							p.Println(fmt.Sprintf("%sAgent panic: %v%s", pt.ANSI(pt.Error), r, pt.ANSIReset()))
+							p.Send(appendOutputMsg(fmt.Sprintf("%sAgent panic: %v%s", pt.ANSI(pt.Error), r, pt.ANSIReset())))
 						}
 						p.Send(agentDoneMsg{})
 						agentDoneCh <- struct{}{}
