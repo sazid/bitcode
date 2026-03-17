@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/version"
 )
@@ -43,20 +43,9 @@ var inputKeys = inputKeyMap{
 	),
 }
 
-// printWelcomeBanner displays the welcome banner with project info.
+// printWelcomeBanner displays startup info (printed once to scrollback).
 func printWelcomeBanner(model, reasoning string) {
 	t := ActiveTheme()
-
-	binaryStyle := lipgloss.NewStyle().
-		Foreground(t.Dim)
-
-	logoStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(t.Primary)
-
-	subtitleStyle := lipgloss.NewStyle().
-		Foreground(t.Dim).
-		PaddingLeft(2)
 
 	infoStyle := lipgloss.NewStyle().
 		Foreground(t.Info).
@@ -65,28 +54,10 @@ func printWelcomeBanner(model, reasoning string) {
 	labelStyle := lipgloss.NewStyle().
 		Foreground(t.Dim)
 
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(t.Command)
-
 	wd, _ := os.Getwd()
 
-	// Binary-stream ASCII logo — each line has fading binary digits
-	// flowing into the solid "BitCode" letterforms.
-	logo := []struct{ binary, text string }{
-		{"  0110 ", " ____  _ _    ____          _      "},
-		{"  1001 ", "| __ )(_) |_ / ___|___   __| | ___ "},
-		{"  0110 ", "|  _ \\| | __| |   / _ \\ / _` |/ _ \\"},
-		{"  1010 ", "| |_) | | |_| |__| (_) | (_| |  __/"},
-		{"  0101 ", "|____/|_|\\__|\\____\\___/ \\__,_|\\___|"},
-	}
-
 	fmt.Fprintln(os.Stderr)
-	for _, line := range logo {
-		fmt.Fprintln(os.Stderr, binaryStyle.Render(line.binary)+logoStyle.Render(line.text))
-	}
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, renderLogo())
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
 		labelStyle.Render("Version:   ")+version.String(),
 	))
@@ -103,11 +74,28 @@ func printWelcomeBanner(model, reasoning string) {
 		labelStyle.Render("Cwd:       ")+wd,
 	))
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, subtitleStyle.Render(
-		"Tips: "+
-			cmdStyle.Render("/help")+" for commands, "+
-			cmdStyle.Render("/new")+" for new conversation",
-	))
+}
+
+// logoLines is the pre-rendered half-block logo for "BITCODE".
+// Uses Unicode block elements (█ ▀ ▄) for a solid, filled appearance.
+var logoLines = []string{
+	"██▀▀▀█▄  ▀███▀  ▀▀███▀▀  ▄█▀▀▀▀  ▄█▀▀▀█▄  ██▀▀█▄   ██▀▀▀▀▀",
+	"██▄▄▄█▀   ███     ███    ██      ██   ██  ██   ██  ██▄▄▄▄ ",
+	"██   ██   ███     ███    ██      ██   ██  ██   ██  ██     ",
+	"██▄▄▄█▀  ▄███▄    ███    ▀█▄▄▄▄  ▀█▄▄▄█▀  ██▄▄█▀   ██▄▄▄▄▄",
+}
+
+// renderLogo renders the block-character logo in the theme's primary color.
+func renderLogo() string {
+	t := ActiveTheme()
+	style := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
+	var sb strings.Builder
+	for _, line := range logoLines {
+		sb.WriteString("  ")
+		sb.WriteString(style.Render(line))
+		sb.WriteRune('\n')
+	}
+	return sb.String()
 }
 
 // printHelp displays available commands and skills.
