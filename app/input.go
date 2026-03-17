@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
@@ -43,59 +42,31 @@ var inputKeys = inputKeyMap{
 	),
 }
 
-// printWelcomeBanner displays startup info (printed once to scrollback).
+// printWelcomeBanner displays the small logo icon and startup info.
 func printWelcomeBanner(model, reasoning string) {
 	t := ActiveTheme()
 
-	infoStyle := lipgloss.NewStyle().
-		Foreground(t.Info).
-		PaddingLeft(2)
-
-	labelStyle := lipgloss.NewStyle().
-		Foreground(t.Dim)
+	icon := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
+	name := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
+	dim := lipgloss.NewStyle().Foreground(t.Dim)
 
 	wd, _ := os.Getwd()
-
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, renderLogo())
-	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Version:   ")+version.String(),
-	))
-	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Model:     ")+model,
-	))
 	if reasoning == "" {
 		reasoning = "default"
 	}
-	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Reasoning: ")+reasoning,
-	))
-	fmt.Fprintln(os.Stderr, infoStyle.Render(
-		labelStyle.Render("Cwd:       ")+wd,
-	))
+
 	fmt.Fprintln(os.Stderr)
-}
-
-// logoLines is the pre-rendered half-block logo for "BITCODE".
-// Uses Unicode block elements (█ ▀ ▄) for a solid, filled appearance.
-var logoLines = []string{
-	"██▀▀▀█▄  ▀███▀  ▀▀███▀▀  ▄█▀▀▀▀  ▄█▀▀▀█▄  ██▀▀█▄   ██▀▀▀▀▀",
-	"██▄▄▄█▀   ███     ███    ██      ██   ██  ██   ██  ██▄▄▄▄ ",
-	"██   ██   ███     ███    ██      ██   ██  ██   ██  ██     ",
-	"██▄▄▄█▀  ▄███▄    ███    ▀█▄▄▄▄  ▀█▄▄▄█▀  ██▄▄█▀   ██▄▄▄▄▄",
-}
-
-// renderLogo renders the block-character logo in the theme's primary color.
-func renderLogo() string {
-	t := ActiveTheme()
-	style := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
-	var sb strings.Builder
-	for _, line := range logoLines {
-		sb.WriteString("  ")
-		sb.WriteString(style.Render(line))
-		sb.WriteRune('\n')
-	}
-	return sb.String()
+	fmt.Fprintf(os.Stderr, " %s   %s %s\n",
+		icon.Render("▄▀▀▄▄▀▀▄"),
+		name.Render("BitCode"),
+		dim.Render(version.String()))
+	fmt.Fprintf(os.Stderr, " %s   %s\n",
+		icon.Render("█▄▄██▄▄█"),
+		dim.Render(model+" · "+reasoning))
+	fmt.Fprintf(os.Stderr, "  %s    %s\n",
+		icon.Render("▀▀  ▀▀"),
+		dim.Render(wd))
+	fmt.Fprintln(os.Stderr)
 }
 
 // printHelp displays available commands and skills.
