@@ -47,10 +47,12 @@ var inputKeys = inputKeyMap{
 func printWelcomeBanner(model, reasoning string) {
 	t := ActiveTheme()
 
-	titleStyle := lipgloss.NewStyle().
+	binaryStyle := lipgloss.NewStyle().
+		Foreground(t.Dim)
+
+	logoStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(t.Primary).
-		PaddingLeft(1)
+		Foreground(t.Primary)
 
 	subtitleStyle := lipgloss.NewStyle().
 		Foreground(t.Dim).
@@ -68,8 +70,21 @@ func printWelcomeBanner(model, reasoning string) {
 
 	wd, _ := os.Getwd()
 
+	// Binary-stream ASCII logo — each line has fading binary digits
+	// flowing into the solid "BitCode" letterforms.
+	logo := []struct{ binary, text string }{
+		{"  0110 ", " ____  _ _    ____          _      "},
+		{"  1001 ", "| __ )(_) |_ / ___|___   __| | ___ "},
+		{"  0110 ", "|  _ \\| | __| |   / _ \\ / _` |/ _ \\"},
+		{"  1010 ", "| |_) | | |_| |__| (_) | (_| |  __/"},
+		{"  0101 ", "|____/|_|\\__|\\____\\___/ \\__,_|\\___|"},
+	}
+
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, titleStyle.Render("⚡ "+ansi.SetHyperlink("https://github.com/sazid/bitcode")+"BitCode"+ansi.ResetHyperlink()+" [https://github.com/sazid/bitcode]"))
+	for _, line := range logo {
+		fmt.Fprintln(os.Stderr, binaryStyle.Render(line.binary)+logoStyle.Render(line.text))
+	}
+	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, subtitleStyle.Render("AI-powered coding assistant by "+ansi.SetHyperlink("https://github.com/sazid")+"@sazid"+ansi.ResetHyperlink()))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, infoStyle.Render(
