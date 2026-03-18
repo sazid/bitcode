@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/sazid/bitcode/main/install.sh | sh
 
 ---
 
-[![asciicast](https://asciinema.org/a/OEbplbhzYB1xU4bl.svg)](https://asciinema.org/a/OEbplbhzYB1xU4bl)
+<a href="https://asciinema.org/a/850426" target="_blank"><img src="https://asciinema.org/a/850426.svg" /></a>
 
 An agentic AI coding assistant in your terminal — with interactive TUI, smart security guards, extensible skills, built-in todo tracking with planning, and full control over reasoning effort.
 
