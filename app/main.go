@@ -12,12 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
-	"github.com/sazid/bitcode/internal/config"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/notify"
-	"github.com/sazid/bitcode/internal/reminder"
-	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 	"github.com/sazid/bitcode/internal/version"
 )
@@ -56,141 +53,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Theme registry
 	themes := DefaultThemeRegistry()
+	toolManager, compactState, todoStore, skillManager := buildToolManager()
+	instructionFiles := discoverInstructionFiles()
+	reminderMgr := buildReminderManager(skillManager, instructionFiles)
+	guardMgr := buildGuardManager(model, apiKey, baseUrl)
 
-	toolManager := tools.NewManager()
-	toolManager.Register(&tools.ReadTool{})
-	toolManager.Register(&tools.WriteTool{})
-	toolManager.Register(&tools.EditTool{})
-	toolManager.Register(&tools.GlobTool{})
-	toolManager.Register(&tools.BashTool{})
-	toolManager.Register(&tools.WebSearchTool{})
-	toolManager.Register(&tools.LineCountTool{})
-	toolManager.Register(&tools.FileSizeTool{})
-
-	compactState := tools.NewCompactState()
-	toolManager.Register(&tools.CompactTool{State: compactState})
-
-	todoStore := tools.NewTodoStore()
-	toolManager.Register(&tools.TodoReadTool{Store: todoStore})
-	toolManager.Register(&tools.TodoWriteTool{Store: todoStore})
-
-	skillManager := skills.DefaultManager()
-	toolManager.Register(&tools.SkillTool{SkillManager: skillManager})
-
-	// Discover CLAUDE.md and AGENTS.md instruction files
-	wd, _ := os.Getwd()
-	discovered := config.DiscoverInstructionFiles(wd)
-	// Merge project and user files into a single list for the system prompt
-	var instructionFiles []string
-	instructionFiles = append(instructionFiles, discovered.ProjectFiles...)
-	for _, f := range discovered.UserFiles {
-		instructionFiles = append(instructionFiles, "~/"+f)
-	}
-
-	reminderMgr := reminder.NewManager()
-
-	// Register built-in reminders
-	reminderMgr.Register(reminder.Reminder{
-		ID:       "skill-availability",
-		Content:  buildSkillReminderContent(skillManager),
-		Schedule: reminder.Schedule{Kind: reminder.ScheduleOneShot},
-		Source:   "builtin",
-		Priority: 0,
-		Active:   true,
-	})
-	reminderMgr.Register(reminder.Reminder{
-		ID:      "conversation-length",
-		Content: "The conversation is getting long. Use the Compact tool to summarize the conversation and free up context space. Include all important context in your summary so you can continue working effectively. If the current task is already complete, suggest starting a new conversation with /new instead.",
-		Schedule: reminder.Schedule{
-			Kind:     reminder.ScheduleCondition,
-			MaxFires: 2,
-			Condition: func(state *reminder.ConversationState) bool {
-				return len(state.Messages) > 80
-			},
-		},
-		Source:   "builtin",
-		Priority: 1,
-		Active:   true,
-	})
-
-	// Periodic reminder about instruction files
-	if len(instructionFiles) > 0 {
-		reminderMgr.Register(reminder.Reminder{
-			ID:      "instruction-files",
-			Content: buildInstructionFilesReminderContent(instructionFiles),
-			Schedule: reminder.Schedule{
-				Kind:         reminder.ScheduleTurn,
-				TurnInterval: 10,
-			},
-			Source:   "builtin",
-			Priority: 0,
-			Active:   true,
-		})
-	}
-
-	// End-of-work reminder to update instruction files
-	if len(instructionFiles) > 0 {
-		reminderMgr.Register(reminder.Reminder{
-			ID:      "update-instruction-files",
-			Content: "You've done significant work in this session. Before finishing, consider whether the project's instruction files (CLAUDE.md, AGENTS.md) should be updated to reflect important changes — such as new conventions, architecture decisions, build commands, or key patterns. Only update if genuinely relevant and important; skip for minor or routine changes.",
-			Schedule: reminder.Schedule{
-				Kind:     reminder.ScheduleCondition,
-				MaxFires: 1,
-				Condition: func(state *reminder.ConversationState) bool {
-					return state.Turn >= 15
-				},
-			},
-			Source:   "builtin",
-			Priority: 2,
-			Active:   true,
-		})
-	}
-
-	// Load reminder plugins from disk
-	for _, r := range reminder.LoadPlugins() {
-		reminderMgr.Register(r)
-	}
-
-	// Guard system
-	guardMgr := guard.NewManager()
-	guardMgr.AddRule(&guard.DangerousCommandRule{})
-	guardMgr.AddRule(&guard.WorkingDirRule{})
-	guardMgr.AddRule(&guard.SensitiveFileRule{})
-	for _, r := range guard.LoadPlugins() {
-		guardMgr.AddRule(r)
-	}
-	guardMgr.AddRule(&guard.DefaultPolicyRule{})
-
-	// Optional LLM guard agent (enabled by default unless explicitly disabled)
-	// To disable: set BITCODE_GUARD_LLM=false
-	if os.Getenv("BITCODE_GUARD_LLM") != "false" {
-		guardModel := os.Getenv("BITCODE_GUARD_LLM_MODEL")
-		if guardModel == "" {
-			guardModel = model
-		}
-		guardBaseURL := os.Getenv("BITCODE_GUARD_LLM_BASE_URL")
-		if guardBaseURL == "" {
-			guardBaseURL = baseUrl
-		}
-		guardAPIKey := os.Getenv("BITCODE_GUARD_LLM_API_KEY")
-		if guardAPIKey == "" {
-			guardAPIKey = apiKey
-		}
-		guardProvider := llm.NewOpenAIProvider(guardAPIKey, guardBaseURL)
-		guardSkillMgr := guard.NewGuardSkillManager()
-
-		maxTurns := 0 // uses default (5)
-		if v := os.Getenv("BITCODE_GUARD_MAX_TURNS"); v != "" {
-			fmt.Sscan(v, &maxTurns)
-		}
-
-		guardMgr.SetLLMValidator(guard.NewGuardAgent(guardProvider, guardModel, guardSkillMgr, maxTurns))
-	}
-
-	isNonInteractive := prompt != ""
-	if isNonInteractive {
+	if prompt != "" {
 		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
 	}
 
@@ -289,7 +158,6 @@ func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
 func runInteractive(config *AgentConfig, themes *ThemeRegistry) {
 	printWelcomeBanner(themes.Active(), config.Model, config.Reasoning)
 
-	// Build slash command list for autocomplete
 	slashCommands := buildSlashCommands(config)
 	submitCh := make(chan InputResult, 1)
 
@@ -311,7 +179,6 @@ func runInteractive(config *AgentConfig, themes *ThemeRegistry) {
 		})
 	}
 
-	// Orchestrator goroutine manages agent lifecycle
 	go runOrchestrator(p, config, themes, submitCh)
 
 	if _, err := p.Run(); err != nil {
@@ -337,35 +204,4 @@ func buildSlashCommands(config *AgentConfig) []SlashCommand {
 		})
 	}
 	return commands
-}
-
-// buildInstructionFilesReminderContent creates reminder content listing discovered instruction files.
-func buildInstructionFilesReminderContent(files []string) string {
-	var sb strings.Builder
-	sb.WriteString("The following instruction files are available. Read them when working in or near their directories:\n")
-	for _, f := range files {
-		fmt.Fprintf(&sb, " - %s\n", f)
-	}
-	return sb.String()
-}
-
-// buildSkillReminderContent creates reminder content listing available skills.
-func buildSkillReminderContent(sm skills.SkillProvider) string {
-	skillList := sm.List()
-	if len(skillList) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("Available skills (invoke via the Skill tool):\n")
-	for _, s := range skillList {
-		fmt.Fprintf(&sb, "- %s", s.Name)
-		if s.Description != "" {
-			fmt.Fprintf(&sb, ": %s", s.Description)
-		}
-		if s.Trigger != "" {
-			fmt.Fprintf(&sb, " (Trigger: %s)", s.Trigger)
-		}
-		sb.WriteString("\n")
-	}
-	return sb.String()
 }
