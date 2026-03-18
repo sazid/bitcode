@@ -67,8 +67,17 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 	}()
 	defer func() { close(eventsCh); <-done }()
 
+	// If provider supports persistent connections (WebSocket), manage lifecycle
+	if sp, ok := cfg.Provider.(llm.SessionProvider); ok {
+		if err := sp.Connect(ctx); err == nil {
+			defer sp.Close()
+		}
+	}
+
 	startTime := time.Now()
 	var lastToolNames []string
+	var responseID string     // for StatefulProvider (Responses API)
+	var prevMessageCount int  // messages already covered by previous_response_id
 
 	maxTurns := cfg.MaxTurns
 	if maxTurns <= 0 {
@@ -90,6 +99,8 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					systemMsg,
 					llm.TextMessage(llm.RoleUser, fmt.Sprintf("<context>\nThis is a summary of the conversation so far. The full history has been compacted to free up context space.\n\n%s\n</context>\n\nThe conversation was compacted. Continue assisting based on the summary above.", summary)),
 				}
+				responseID = ""       // reset stateful chain after compaction
+				prevMessageCount = 0
 				eventsCh <- internal.Event{
 					Name:    "Compact",
 					Message: fmt.Sprintf("Compacted conversation from %d messages to %d", turn, len(*messages)),
@@ -115,12 +126,53 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 			cb.OnThinking(true)
 		}
 
-		resp, err := cfg.Provider.Complete(ctx, llm.CompletionParams{
+		// Build streaming callback
+		var onDelta func(llm.StreamDelta)
+		if cb.OnContent != nil {
+			onDelta = func(d llm.StreamDelta) {
+				switch d.Type {
+				case llm.DeltaText:
+					// Streaming text will be delivered via OnContent at the end
+					// (keeping current behavior of full-message delivery)
+				case llm.DeltaThinking:
+					// Could be wired to UI in the future
+				}
+			}
+		}
+
+		params := llm.CompletionParams{
 			Model:           cfg.Model,
 			Messages:        messagesForAPI,
 			Tools:           toolDefs,
 			ReasoningEffort: cfg.Reasoning,
-		}, nil)
+		}
+
+		var resp *llm.CompletionResponse
+		var err error
+
+		// Use StatefulProvider if available (threads response IDs for Responses API)
+		if sp, ok := cfg.Provider.(llm.StatefulProvider); ok {
+			// Count non-system messages for incremental input tracking
+			msgCount := len(messagesForAPI)
+			if msgCount > 0 && messagesForAPI[0].Role == llm.RoleSystem {
+				msgCount--
+			}
+
+			statefulResp, statefulErr := sp.CompleteStateful(ctx, llm.StatefulCompletionParams{
+				CompletionParams:     params,
+				PreviousResponseID:   responseID,
+				PreviousMessageCount: prevMessageCount,
+			}, onDelta)
+			if statefulErr != nil {
+				err = statefulErr
+			} else {
+				resp = &statefulResp.CompletionResponse
+				responseID = statefulResp.ResponseID
+				prevMessageCount = msgCount
+			}
+		} else {
+			resp, err = cfg.Provider.Complete(ctx, params, onDelta)
+		}
 
 		if cb.OnThinking != nil {
 			cb.OnThinking(false)

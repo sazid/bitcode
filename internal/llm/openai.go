@@ -52,8 +52,29 @@ func (p *OpenAIProvider) completeStream(ctx context.Context, params CompletionPa
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
 
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			onDelta(StreamDelta{Text: chunk.Choices[0].Delta.Content})
+		if len(chunk.Choices) > 0 {
+			delta := chunk.Choices[0].Delta
+			if delta.Content != "" {
+				onDelta(StreamDelta{Type: DeltaText, Text: delta.Content})
+			}
+			// Stream tool call argument deltas
+			for _, tc := range delta.ToolCalls {
+				if tc.Function.Arguments != "" {
+					onDelta(StreamDelta{
+						Type:         DeltaToolArgs,
+						Text:         tc.Function.Arguments,
+						ToolCallID:   tc.ID,
+						ToolCallName: tc.Function.Name,
+					})
+				}
+				if tc.Function.Name != "" {
+					onDelta(StreamDelta{
+						Type:         DeltaToolName,
+						ToolCallID:   tc.ID,
+						ToolCallName: tc.Function.Name,
+					})
+				}
+			}
 		}
 	}
 
@@ -92,6 +113,9 @@ func buildOpenAIParams(params CompletionParams) openai.ChatCompletionNewParams {
 	if params.ReasoningEffort != "" {
 		p.ReasoningEffort = openai.ReasoningEffort(params.ReasoningEffort)
 	}
+	if params.MaxTokens > 0 {
+		p.MaxCompletionTokens = openai.Int(int64(params.MaxTokens))
+	}
 	return p
 }
 
@@ -113,17 +137,73 @@ func responseFromChoice(choice openai.ChatCompletionChoice) *CompletionResponse 
 	}
 }
 
-func toOpenAIMessage(m Message) openai.ChatCompletionMessageParamUnion {
-	text := m.Text()
+// hasMultiModalContent returns true if any content block is non-text.
+func hasMultiModalContent(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == ContentImage || b.Type == ContentAudio || b.Type == ContentDocument {
+			return true
+		}
+	}
+	return false
+}
 
+// toOpenAIContentParts converts content blocks to OpenAI content part union types.
+func toOpenAIContentParts(blocks []ContentBlock) []openai.ChatCompletionContentPartUnionParam {
+	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case ContentText:
+			parts = append(parts, openai.TextContentPart(b.Text))
+		case ContentImage:
+			if b.Source != nil {
+				url := b.Source.URL
+				if b.Source.Type == "base64" && b.Source.Data != "" {
+					// Convert base64 to data URI for OpenAI
+					url = "data:" + b.Source.MediaType + ";base64," + b.Source.Data
+				}
+				parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+					URL: url,
+				}))
+			}
+		case ContentAudio:
+			if b.Source != nil && b.Source.Data != "" {
+				// Map our media type to OpenAI's expected format string
+				format := "wav" // default
+				switch b.Source.MediaType {
+				case "audio/mp3", "audio/mpeg":
+					format = "mp3"
+				case "audio/wav":
+					format = "wav"
+				}
+				parts = append(parts, openai.InputAudioContentPart(openai.ChatCompletionContentPartInputAudioInputAudioParam{
+					Data:   b.Source.Data,
+					Format: format,
+				}))
+			}
+		// ContentDocument, ContentVideo, ContentThinking — skip for OpenAI Chat Completions
+		default:
+			if b.Text != "" {
+				parts = append(parts, openai.TextContentPart(b.Text))
+			}
+		}
+	}
+	return parts
+}
+
+func toOpenAIMessage(m Message) openai.ChatCompletionMessageParamUnion {
 	switch m.Role {
 	case RoleSystem:
-		return openai.SystemMessage(text)
+		return openai.SystemMessage(m.Text())
 	case RoleUser:
-		return openai.UserMessage(text)
+		if hasMultiModalContent(m.Content) {
+			parts := toOpenAIContentParts(m.Content)
+			return openai.UserMessage[[]openai.ChatCompletionContentPartUnionParam](parts)
+		}
+		return openai.UserMessage(m.Text())
 	case RoleTool:
-		return openai.ToolMessage(text, m.ToolCallID)
+		return openai.ToolMessage(m.Text(), m.ToolCallID)
 	case RoleAssistant:
+		text := m.Text()
 		if len(m.ToolCalls) == 0 {
 			return openai.AssistantMessage(text)
 		}
@@ -147,5 +227,5 @@ func toOpenAIMessage(m Message) openai.ChatCompletionMessageParamUnion {
 		}
 		return openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant}
 	}
-	return openai.UserMessage(text)
+	return openai.UserMessage(m.Text())
 }

@@ -34,7 +34,9 @@ An agentic AI coding assistant in your terminal — with interactive TUI, smart 
 - **Skills** — User-defined prompt templates loaded from `.agents/`, `.claude/`, or `.bitcode/` directories
 - **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
 - **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
-- **OpenRouter Integration** — Works with any OpenAI-compatible API (including local servers)
+- **Multi-Provider Support** — Anthropic, OpenAI (Chat Completions + Responses API), OpenRouter, and any OpenAI-compatible API
+- **Multi-Modal** — Images, audio, and document content in conversations
+- **WebSocket Streaming** — Optional WebSocket transport for faster tool-heavy workflows (OpenAI Responses API)
 
 ### Tools
 
@@ -55,23 +57,23 @@ An agentic AI coding assistant in your terminal — with interactive TUI, smart 
 ## Requirements
 
 - Go 1.26+
-- An OpenRouter API key (or any OpenAI-compatible endpoint; not required for localhost)
+- An API key for your LLM provider (not required for localhost)
 
 ## Getting Started
 
 ### 1. Clone and configure
 
-Create a `.env` file in the project root with your API key:
+Create a `.env` file in the project root:
 
-```
-OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxxxxx
-```
+```sh
+# Anthropic (auto-detected from model name)
+BITCODE_API_KEY=sk-ant-xxxxxxxxxxxx
+BITCODE_MODEL=claude-sonnet-4-6
 
-Optionally set the model and base URL:
-
-```
-OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# Or OpenRouter / OpenAI-compatible
+BITCODE_API_KEY=sk-or-v1-xxxxxxxxxxxx
+BITCODE_MODEL=openrouter/free
+BITCODE_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 ### 2. Build
@@ -105,24 +107,49 @@ This launches a TUI with a multiline input editor. Use `Ctrl+S` to submit, `Ente
 **With a different model:**
 
 ```sh
-OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514 ./bitcode -p "Explain main.go"
-```
-
-**With a local server (no API key needed):**
-
-```sh
-OPENROUTER_BASE_URL=http://localhost:1234/v1 OPENROUTER_MODEL=local-model ./bitcode
+BITCODE_MODEL=claude-opus-4-6 ./bitcode -p "Explain main.go"
 ```
 
 ## Environment Variables
 
+### LLM Provider
+
 | Variable | Description | Default |
 |---|---|---|
-| `OPENROUTER_API_KEY` | API key for OpenRouter (not required for localhost) | *(required for remote)* |
-| `OPENROUTER_BASE_URL` | Base URL for the API | `https://openrouter.ai/api/v1` |
-| `OPENROUTER_MODEL` | Model to use | `openrouter/free` |
-| `BITCODE_GUARD_LLM` | Enable the LLM-powered guard agent | `true` |
-| `BITCODE_GUARD_MODEL` | Model to use for guard agent | *(uses main model)* |
+| `BITCODE_API_KEY` | API key for the LLM provider (not required for localhost) | *(required for remote)* |
+| `BITCODE_MODEL` | Model to use | auto-detected from provider |
+| `BITCODE_BASE_URL` | API endpoint | auto-detected from provider |
+| `BITCODE_PROVIDER` | Backend: `openai-chat`, `openai-responses`, `anthropic` | auto-detect from model name |
+| `BITCODE_WEBSOCKET` | Use WebSocket transport (only for `openai-responses`) | `false` |
+
+The provider is auto-detected: if no base URL is set and the model starts with `claude-`, it connects to Anthropic's API directly. If a custom base URL is set (OpenRouter, Bedrock, local proxy, etc.), it always uses OpenAI Chat Completions format — the universal compatibility protocol these services expose.
+
+**Examples:**
+
+```sh
+# Direct Anthropic (auto-detected, no base URL needed)
+BITCODE_API_KEY=sk-ant-xxx BITCODE_MODEL=claude-sonnet-4-6
+
+# Claude via OpenRouter (base URL forces openai-chat format)
+BITCODE_API_KEY=sk-or-xxx BITCODE_MODEL=anthropic/claude-sonnet-4-6 BITCODE_BASE_URL=https://openrouter.ai/api/v1
+
+# Claude via AWS Bedrock (base URL forces openai-chat format)
+BITCODE_API_KEY=xxx BITCODE_MODEL=anthropic.claude-v2 BITCODE_BASE_URL=https://bedrock-runtime.us-east-1.amazonaws.com
+
+# Local server (no API key needed)
+BITCODE_BASE_URL=http://localhost:1234/v1 BITCODE_MODEL=local-model
+```
+
+### Guard Agent
+
+| Variable | Description | Default |
+|---|---|---|
+| `BITCODE_GUARD` | Enable the LLM-powered guard agent | `true` |
+| `BITCODE_GUARD_MODEL` | Model for guard agent | *(same as main)* |
+| `BITCODE_GUARD_API_KEY` | API key for guard agent | *(same as main)* |
+| `BITCODE_GUARD_BASE_URL` | Base URL for guard agent | *(same as main)* |
+| `BITCODE_GUARD_PROVIDER` | Backend for guard agent | *(same as main)* |
+| `BITCODE_GUARD_MAX_TURNS` | Max turns for guard agent | unlimited |
 
 ## Interactive Mode Keys
 
@@ -178,7 +205,7 @@ The **Guard Agent** is an expert multi-turn LLM agent specifically designed for 
 - Supports on-demand "simulate" skill for step-by-step code tracing
 - Can escalate to user prompts when uncertain
 
-The guard agent is enabled by default. Set `BITCODE_GUARD_LLM=false` to use only rule-based guards.
+The guard agent is enabled by default. Set `BITCODE_GUARD=false` to use only rule-based guards.
 
 See [docs/tool-guards.md](docs/tool-guards.md) for the full architecture, rule definitions, and customization options.
 
@@ -205,8 +232,13 @@ app/
 internal/
   event.go          # Event types for tool output
   llm/
-    llm.go          # Provider interface, message types, content blocks
-    openai.go       # OpenAI-compatible provider (sync + streaming)
+    llm.go              # Provider interface, message types, multi-modal content blocks
+    openai.go           # OpenAI Chat Completions provider
+    anthropic.go        # Anthropic Messages API provider
+    openai_responses.go # OpenAI Responses API provider (HTTP SSE)
+    openai_responses_ws.go # OpenAI Responses API provider (WebSocket)
+    provider.go         # Provider factory and auto-detection
+    sse/                # Reusable SSE stream parser
   guard/            # Tool guard system (rules, LLM validator, guard agent)
     skills/         # Guard agent security skills (bash, python, go, js, simulate)
   reminder/         # System reminder framework (evaluation, injection, plugins)

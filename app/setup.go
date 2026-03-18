@@ -118,7 +118,7 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 
 // buildGuardManager creates the guard manager with built-in rules, plugin rules,
 // and the optional LLM guard agent.
-func buildGuardManager(model, apiKey, baseUrl string) *guard.Manager {
+func buildGuardManager(mainCfg llm.ProviderConfig) *guard.Manager {
 	mgr := guard.NewManager()
 	mgr.AddRule(&guard.DangerousCommandRule{})
 	mgr.AddRule(&guard.WorkingDirRule{})
@@ -129,11 +129,25 @@ func buildGuardManager(model, apiKey, baseUrl string) *guard.Manager {
 	mgr.AddRule(&guard.DefaultPolicyRule{})
 
 	// Optional LLM guard agent (enabled by default unless explicitly disabled)
-	if os.Getenv("BITCODE_GUARD_LLM") != "false" {
-		guardModel := envOrDefault("BITCODE_GUARD_LLM_MODEL", model)
-		guardBaseURL := envOrDefault("BITCODE_GUARD_LLM_BASE_URL", baseUrl)
-		guardAPIKey := envOrDefault("BITCODE_GUARD_LLM_API_KEY", apiKey)
-		guardProvider := llm.NewOpenAIProvider(guardAPIKey, guardBaseURL)
+	//
+	// Environment variables:
+	//   BITCODE_GUARD         — "false" to disable the LLM guard agent
+	//   BITCODE_GUARD_MODEL   — model for guard (default: same as main)
+	//   BITCODE_GUARD_API_KEY — API key for guard (default: same as main)
+	//   BITCODE_GUARD_BASE_URL — base URL for guard (default: same as main)
+	//   BITCODE_GUARD_PROVIDER — backend for guard (default: same as main)
+	//   BITCODE_GUARD_MAX_TURNS — max turns for guard agent (default: 0 = unlimited)
+	if os.Getenv("BITCODE_GUARD") != "false" {
+		guardCfg := llm.ProviderConfig{
+			Backend: envOrDefault("BITCODE_GUARD_PROVIDER", mainCfg.Backend),
+			Model:   envOrDefault("BITCODE_GUARD_MODEL", mainCfg.Model),
+			BaseURL: envOrDefault("BITCODE_GUARD_BASE_URL", mainCfg.BaseURL),
+			APIKey:  envOrDefault("BITCODE_GUARD_API_KEY", mainCfg.APIKey),
+		}
+		guardProvider, err := llm.NewProvider(guardCfg)
+		if err != nil {
+			guardProvider, _ = llm.NewProvider(mainCfg)
+		}
 		guardSkillMgr := guard.NewGuardSkillManager()
 
 		maxTurns := 0
@@ -141,7 +155,7 @@ func buildGuardManager(model, apiKey, baseUrl string) *guard.Manager {
 			fmt.Sscan(v, &maxTurns)
 		}
 
-		mgr.SetLLMValidator(guard.NewGuardAgent(guardProvider, guardModel, guardSkillMgr, maxTurns))
+		mgr.SetLLMValidator(guard.NewGuardAgent(guardProvider, guardCfg.Model, guardSkillMgr, maxTurns))
 	}
 
 	return mgr

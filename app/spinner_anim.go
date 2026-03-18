@@ -74,7 +74,7 @@ func renderGlimmer(t *Theme, runes []rune, _ int) string {
 
 // renderWave sweeps a bright spot across the text, looping.
 func renderWave(t *Theme, runes []rune, frame int) string {
-	wavePos := (frame / 2) % (len(runes) + 6) - 3
+	wavePos := (frame/2)%(len(runes)+6) - 3
 	var sb strings.Builder
 	sb.WriteString(t.ANSIDim())
 	for i, r := range runes {

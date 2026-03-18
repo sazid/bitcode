@@ -19,15 +19,25 @@ With reasoning: `./bitcode --reasoning high -p "prompt"`
 ## Environment
 
 Configured via `.env` file or environment variables:
-- `OPENROUTER_API_KEY` — API key (not needed for localhost)
-- `OPENROUTER_MODEL` — model name (default: `openrouter/free`)
-- `OPENROUTER_BASE_URL` — API endpoint (default: `https://openrouter.ai/api/v1`)
-- `BITCODE_GUARD_LLM` — enable LLM guard agent (default: `true`)
-- `BITCODE_GUARD_MODEL` — separate model for guard agent (optional)
+
+**LLM Provider:**
+- `BITCODE_API_KEY` — API key (not needed for localhost)
+- `BITCODE_MODEL` — model name (default: auto-detected from provider)
+- `BITCODE_BASE_URL` — API endpoint (default: auto-detected from provider)
+- `BITCODE_PROVIDER` — backend: `openai-chat`, `openai-responses`, `anthropic` (default: auto-detect from model name)
+- `BITCODE_WEBSOCKET` — `true` to use WebSocket transport for `openai-responses` backend
+
+**Guard Agent:**
+- `BITCODE_GUARD` — `false` to disable the LLM guard agent (default: enabled)
+- `BITCODE_GUARD_MODEL` — separate model for guard (default: same as main)
+- `BITCODE_GUARD_API_KEY` — separate API key for guard (default: same as main)
+- `BITCODE_GUARD_BASE_URL` — separate base URL for guard (default: same as main)
+- `BITCODE_GUARD_PROVIDER` — separate backend for guard (default: same as main)
+- `BITCODE_GUARD_MAX_TURNS` — max turns for guard agent (default: unlimited)
 
 ## Architecture
 
-BitCode is an agentic AI coding assistant CLI built in Go. It uses an OpenAI-compatible API via OpenRouter to power an iterative agent loop with tool calling.
+BitCode is an agentic AI coding assistant CLI built in Go. It supports multiple LLM providers (OpenAI Chat Completions, OpenAI Responses API, Anthropic Messages API) through a unified `Provider` interface, with an iterative agent loop and tool calling.
 
 ### Core Loop
 
@@ -36,7 +46,7 @@ BitCode is an agentic AI coding assistant CLI built in Go. It uses an OpenAI-com
 ### Key Packages
 
 - **`app/`** — Entry point, agent loop, TUI input (bubbletea), markdown rendering (glamour), system prompt construction. All files are in package `main`.
-- **`internal/llm/`** — `Provider` interface and OpenAI-compatible implementation (sync + streaming). All LLM communication flows through this abstraction.
+- **`internal/llm/`** — `Provider` interface with implementations for OpenAI Chat Completions, OpenAI Responses API (HTTP SSE + WebSocket), and Anthropic Messages API. Supports multi-modal content, stateful conversations (`StatefulProvider`), and persistent connections (`SessionProvider`). Provider factory auto-detects backend from model name.
 - **`internal/tools/`** — `Tool` interface + `Manager` registry. Each tool (Read, Write, Edit, Glob, Bash, Skill, TodoRead, TodoWrite) is a separate file. Tools return `ToolResult` and emit `Event`s via a channel.
 - **`internal/guard/`** — Safety layer between LLM decisions and tool execution. Evaluates rules in order (first non-nil `Decision` wins), with verdict escalation: Allow → Deny → Ask user → LLM guard agent. Session approval caching prevents re-prompting. Built-in rules in `rules.go`; LLM-powered guard agent in `guard_agent.go` with language-specific security skills in `guard/skills/`.
 - **`internal/reminder/`** — Injects `<system-reminder>` tags into messages before API calls using copy-on-inject (stored history stays clean). Schedule kinds: always, turn, timer, oneshot, condition. Supports plugin loading from `reminders/` subdirectories.

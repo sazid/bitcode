@@ -37,34 +37,33 @@ func main() {
 		os.Exit(0)
 	}
 
-	apiKey := os.Getenv("OPENROUTER_API_KEY")
-	baseUrl := os.Getenv("OPENROUTER_BASE_URL")
-	model := os.Getenv("OPENROUTER_MODEL")
-	if baseUrl == "" {
-		baseUrl = "https://openrouter.ai/api/v1"
-	}
-	if model == "" {
-		model = "openrouter/free"
-	}
+	providerCfg := resolveProviderConfig()
 
-	isLocalhost := strings.HasPrefix(baseUrl, "http://localhost") || strings.HasPrefix(baseUrl, "http://127.0.0.1")
-	if apiKey == "" && !isLocalhost {
-		fmt.Fprintln(os.Stderr, "Error: Env variable OPENROUTER_API_KEY not found (not required when base URL points to localhost)")
+	isLocalhost := strings.HasPrefix(providerCfg.BaseURL, "http://localhost") || strings.HasPrefix(providerCfg.BaseURL, "http://127.0.0.1")
+	if providerCfg.APIKey == "" && !isLocalhost {
+		fmt.Fprintln(os.Stderr, "Error: BITCODE_API_KEY not set (not required when base URL points to localhost)")
 		os.Exit(1)
 	}
 
+	provider, err := llm.NewProvider(providerCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating LLM provider: %v\n", err)
+		os.Exit(1)
+	}
+
+	model := providerCfg.Model
 	themes := DefaultThemeRegistry()
 	toolManager, compactState, todoStore, skillManager := buildToolManager()
 	instructionFiles := discoverInstructionFiles()
 	reminderMgr := buildReminderManager(skillManager, instructionFiles)
-	guardMgr := buildGuardManager(model, apiKey, baseUrl)
+	guardMgr := buildGuardManager(providerCfg)
 
 	if prompt != "" {
 		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
 	}
 
 	agentConfig := &AgentConfig{
-		Provider:         llm.NewOpenAIProvider(apiKey, baseUrl),
+		Provider:         provider,
 		Model:            model,
 		Reasoning:        reasoningEffort,
 		MaxTurns:         maxTurns,
@@ -184,6 +183,46 @@ func runInteractive(config *AgentConfig, themes *ThemeRegistry) {
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 	}
+}
+
+// resolveProviderConfig determines the LLM provider configuration from environment variables.
+//
+// Environment variables:
+//
+//	BITCODE_API_KEY    — API key for the LLM provider
+//	BITCODE_MODEL      — model name (default: auto-detected from provider)
+//	BITCODE_BASE_URL   — API endpoint (default: auto-detected from provider)
+//	BITCODE_PROVIDER   — backend: "openai-chat", "openai-responses", "anthropic" (default: auto-detect from model)
+//	BITCODE_WEBSOCKET  — "true" to use WebSocket transport for openai-responses
+func resolveProviderConfig() llm.ProviderConfig {
+	cfg := llm.ProviderConfig{
+		Backend:      os.Getenv("BITCODE_PROVIDER"),
+		APIKey:       os.Getenv("BITCODE_API_KEY"),
+		BaseURL:      os.Getenv("BITCODE_BASE_URL"),
+		Model:        os.Getenv("BITCODE_MODEL"),
+		UseWebSocket: os.Getenv("BITCODE_WEBSOCKET") == "true",
+	}
+
+	// Apply defaults based on detected backend
+	backend := cfg.Backend
+	if backend == "" {
+		backend = llm.DetectBackend(cfg.Model, cfg.BaseURL)
+	}
+	switch backend {
+	case llm.BackendAnthropic:
+		if cfg.Model == "" {
+			cfg.Model = "claude-sonnet-4-6"
+		}
+	default:
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "https://openrouter.ai/api/v1"
+		}
+		if cfg.Model == "" {
+			cfg.Model = "openrouter/free"
+		}
+	}
+
+	return cfg
 }
 
 func buildSlashCommands(config *AgentConfig) []SlashCommand {

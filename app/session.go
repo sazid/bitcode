@@ -118,11 +118,11 @@ type SessionState struct {
 
 // SessionRuntime holds channels, widgets, and handles that cannot be serialized.
 type SessionRuntime struct {
-	textarea     textarea.Model
-	permFeedback textinput.Model
-	submitCh     chan InputResult
-	permRespCh   chan guard.PermissionResult
-	agentCancel  context.CancelFunc
+	textarea       textarea.Model
+	permFeedback   textinput.Model
+	submitCh       chan InputResult
+	permRespCh     chan guard.PermissionResult
+	agentCancel    context.CancelFunc
 	todoStore      tools.TodoStore
 	themes         *ThemeRegistry
 	flushing       bool
