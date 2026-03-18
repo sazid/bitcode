@@ -25,6 +25,7 @@ type AgentConfig struct {
 	ReminderMgr      reminder.ReminderEvaluator
 	GuardMgr         guard.GuardEvaluator
 	TodoStore        tools.TodoStore
+	CompactState     *tools.CompactState
 	TaskTitle        string      // Current task title for notifications
 	InstructionFiles []string    // Discovered CLAUDE.md/AGENTS.md relative paths
 	InjectedMessages chan string // optional; user messages injected mid-flight
@@ -80,6 +81,21 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 		// Drain any user messages injected mid-flight
 		drainInjectedMessages(cfg, messages)
+
+		// Apply pending compaction: replace history with system prompt + summary
+		if cfg.CompactState != nil {
+			if summary := cfg.CompactState.TakeSummary(); summary != "" {
+				systemMsg := (*messages)[0] // preserve the system prompt
+				*messages = []llm.Message{
+					systemMsg,
+					llm.TextMessage(llm.RoleUser, fmt.Sprintf("<context>\nThis is a summary of the conversation so far. The full history has been compacted to free up context space.\n\n%s\n</context>\n\nThe conversation was compacted. Continue assisting based on the summary above.", summary)),
+				}
+				eventsCh <- internal.Event{
+					Name:    "Compact",
+					Message: fmt.Sprintf("Compacted conversation from %d messages to %d", turn, len(*messages)),
+				}
+			}
+		}
 
 		// Evaluate reminders and inject into a copy for the API
 		messagesForAPI := *messages

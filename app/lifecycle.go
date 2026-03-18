@@ -53,7 +53,7 @@ func (a *AgentLifecycle) Start(ctx context.Context, messages *[]llm.Message, too
 			title := "BitCode: " + notify.Truncate(a.config.TaskTitle, 40)
 			notify.Send(title, "Done")
 		}()
-		runAgentLoop(ctx, a.config, messages, toolDefs, sessionCallbacks(a.p, a.config, a.themes))
+		runAgentLoop(ctx, a.config, messages, toolDefs, sessionCallbacks(a.p, a.themes))
 	}()
 
 	return true

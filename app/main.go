@@ -69,6 +69,9 @@ func main() {
 	toolManager.Register(&tools.LineCountTool{})
 	toolManager.Register(&tools.FileSizeTool{})
 
+	compactState := tools.NewCompactState()
+	toolManager.Register(&tools.CompactTool{State: compactState})
+
 	todoStore := tools.NewTodoStore()
 	toolManager.Register(&tools.TodoReadTool{Store: todoStore})
 	toolManager.Register(&tools.TodoWriteTool{Store: todoStore})
@@ -99,7 +102,7 @@ func main() {
 	})
 	reminderMgr.Register(reminder.Reminder{
 		ID:      "conversation-length",
-		Content: "The conversation is getting long. Consider summarizing the work done so far and starting a new conversation with /new if the current task is complete.",
+		Content: "The conversation is getting long. Use the Compact tool to summarize the conversation and free up context space. Include all important context in your summary so you can continue working effectively. If the current task is already complete, suggest starting a new conversation with /new instead.",
 		Schedule: reminder.Schedule{
 			Kind:     reminder.ScheduleCondition,
 			MaxFires: 2,
@@ -119,7 +122,7 @@ func main() {
 			Content: buildInstructionFilesReminderContent(instructionFiles),
 			Schedule: reminder.Schedule{
 				Kind:         reminder.ScheduleTurn,
-				TurnInterval: 8,
+				TurnInterval: 10,
 			},
 			Source:   "builtin",
 			Priority: 0,
@@ -136,7 +139,7 @@ func main() {
 				Kind:     reminder.ScheduleCondition,
 				MaxFires: 1,
 				Condition: func(state *reminder.ConversationState) bool {
-					return state.Turn >= 12
+					return state.Turn >= 15
 				},
 			},
 			Source:   "builtin",
@@ -201,6 +204,7 @@ func main() {
 		ReminderMgr:      reminderMgr,
 		GuardMgr:         guardMgr,
 		TodoStore:        todoStore,
+		CompactState:     compactState,
 		InstructionFiles: instructionFiles,
 	}
 

@@ -596,7 +596,7 @@ func (m sessionModel) tickSpinner() tea.Cmd {
 
 // --- Session callbacks for the agent loop ---
 
-func sessionCallbacks(p *tea.Program, config *AgentConfig, themes *ThemeRegistry) AgentCallbacks {
+func sessionCallbacks(p *tea.Program, themes *ThemeRegistry) AgentCallbacks {
 	return AgentCallbacks{
 		OnContent: func(content string) {
 			var buf strings.Builder
