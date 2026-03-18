@@ -51,6 +51,7 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 		} else {
 			d.config.TodoStore.Clear()
 			resetConversation()
+			d.p.Send(newConversationMsg{taskID: GenerateTaskID()})
 			d.p.Send(appendOutputMsg(successStyle().Render("\n  \u2713 Started new conversation")))
 		}
 		return DispatchResult{Handled: true}

@@ -34,6 +34,7 @@ type permRequestMsg struct {
 	decision   guard.Decision
 	responseCh chan guard.PermissionResult
 }
+type newConversationMsg struct{ taskID string }
 
 // --- outputExec implements tea.ExecCommand to write text with the renderer fully stopped ---
 
@@ -110,6 +111,8 @@ type SessionState struct {
 	Height        int             `json:"height"`
 	Quitting      bool            `json:"quitting"`
 	TextContent   string          `json:"text_content"`
+	TaskID        string          `json:"task_id"`
+	TurnCount     int             `json:"turn_count"`
 }
 
 // SessionRuntime holds channels, widgets, and handles that cannot be serialized.
@@ -119,10 +122,11 @@ type SessionRuntime struct {
 	submitCh     chan InputResult
 	permRespCh   chan guard.PermissionResult
 	agentCancel  context.CancelFunc
-	todoStore    tools.TodoStore
-	themes       *ThemeRegistry
-	flushing     bool
-	ticking      bool
+	todoStore      tools.TodoStore
+	themes         *ThemeRegistry
+	flushing       bool
+	ticking        bool
+	agentStartedAt time.Time
 }
 
 // --- Session model ---
@@ -165,6 +169,7 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 			Phase:      sessionIdle,
 			SpinnerMsg: spinnerMessages[rand.Intn(len(spinnerMessages))],
 			Commands:   commands,
+			TaskID:     GenerateTaskID(),
 		},
 		runtime: SessionRuntime{
 			textarea:     ta,
@@ -192,14 +197,21 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case newConversationMsg:
+		m.state.TaskID = msg.taskID
+		m.state.TurnCount = 0
+		return m, nil
+
 	case agentStartMsg:
 		m.runtime.agentCancel = msg.cancel
 		m.state.Phase = sessionAgentRunning
+		m.runtime.agentStartedAt = time.Now()
 		return m, nil
 
 	case agentThinkingMsg:
 		m.state.SpinnerActive = msg.active
 		if msg.active {
+			m.state.TurnCount++
 			m.state.SpinnerFrame = 0
 			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
 			if !m.runtime.ticking {
@@ -214,6 +226,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.SpinnerActive = false
 		m.runtime.ticking = false
 		m.runtime.agentCancel = nil
+		m.runtime.agentStartedAt = time.Time{}
 		return m, nil
 
 	case spinnerTickMsg:
@@ -222,7 +235,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.state.SpinnerFrame++
-		if m.state.SpinnerFrame%45 == 0 {
+		if m.state.SpinnerFrame%100 == 0 {
 			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
 		}
 		return m, m.tickSpinner()
@@ -421,10 +434,14 @@ func (m sessionModel) View() string {
 		}
 	}
 
-	// Spinner (when agent active)
+	// Spinner (when agent active) with elapsed time
 	if m.state.SpinnerActive {
 		bits := randomBinary(6)
-		fmt.Fprintf(&sb, "\n  %s%s%s %s%s%s\n", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), m.state.SpinnerMsg, t.ANSIReset())
+		elapsed := ""
+		if !m.runtime.agentStartedAt.IsZero() {
+			elapsed = " (" + formatDuration(time.Since(m.runtime.agentStartedAt)) + ")"
+		}
+		fmt.Fprintf(&sb, "\n  %s%s%s %s%s%s%s\n", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), m.state.SpinnerMsg, elapsed, t.ANSIReset())
 	}
 
 	// Permission prompt (if in that state)
@@ -439,13 +456,24 @@ func (m sessionModel) View() string {
 		w = 80
 	}
 	lineStyle := lipgloss.NewStyle().Foreground(t.Dim)
-	hline := lineStyle.Render(strings.Repeat("\u2500", w))
+	idStyle := lipgloss.NewStyle().Foreground(t.Info)
 
-	sb.WriteString(hline)
+	// Top border with task ID right-aligned: ──────────── swift-falcon-a7 ──
+	if m.state.TaskID != "" {
+		label := m.state.TaskID
+		// suffix: " label ──" = len(label) + 4 visible chars
+		prefixLen := w - len(label) - 4
+		if prefixLen < 4 {
+			prefixLen = 4
+		}
+		sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", prefixLen)+" ") + idStyle.Render(label) + lineStyle.Render(" \u2500\u2500"))
+	} else {
+		sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", w)))
+	}
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().PaddingLeft(1).Render(m.runtime.textarea.View()))
 	sb.WriteString("\n")
-	sb.WriteString(hline)
+	sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", w)))
 	sb.WriteString("\n")
 
 	// Autocomplete suggestions
@@ -453,12 +481,16 @@ func (m sessionModel) View() string {
 		sb.WriteString(m.renderSuggestions())
 	}
 
-	// Context-dependent hints
+	// Context-dependent hints with turn count
 	hintStyle := lipgloss.NewStyle().Foreground(t.Dim)
+	turnInfo := ""
+	if m.state.TurnCount > 0 {
+		turnInfo = fmt.Sprintf(" \u00b7 turn %d", m.state.TurnCount)
+	}
 	if m.state.Phase == sessionAgentRunning {
-		sb.WriteString(hintStyle.Render("  ctrl+s send message \u00b7 ctrl+c interrupt \u00b7 ctrl+d exit"))
+		sb.WriteString(hintStyle.Render(fmt.Sprintf("  ctrl+s send message \u00b7 ctrl+c interrupt \u00b7 ctrl+d exit%s", turnInfo)))
 	} else {
-		sb.WriteString(hintStyle.Render("  ctrl+s submit \u00b7 esc clear \u00b7 ctrl+d exit"))
+		sb.WriteString(hintStyle.Render(fmt.Sprintf("  ctrl+s submit \u00b7 esc clear \u00b7 ctrl+d exit%s", turnInfo)))
 	}
 
 	return sb.String()
