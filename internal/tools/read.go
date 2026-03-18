@@ -111,23 +111,12 @@ func (r *ReadTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 		fmt.Fprintf(&content, "%5d\t%s\n", i+1, lines[i])
 	}
 
-	previewCount := min(int64(5), lineCount)
-	previewLines := make([]string, previewCount)
-	for i := start; i < start+previewCount; i++ {
-		previewLines[i-start] = fmt.Sprintf("%5d\t%s", i+1, lines[i])
-	}
-	if lineCount > previewCount {
-		previewLines = append(previewLines, "...")
-	}
-
 	info := fmt.Sprintf("Read %d lines", lineCount)
 
 	eventsCh <- internal.Event{
-		Name:        r.Name(),
-		Args:        []string{cleanPath},
-		Message:     info,
-		Preview:     previewLines,
-		PreviewType: internal.PreviewCode,
+		Name:    r.Name(),
+		Args:    []string{cleanPath},
+		Message: info,
 	}
 
 	return ToolResult{
