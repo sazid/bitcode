@@ -99,6 +99,7 @@ type SessionState struct {
 	SpinnerActive bool            `json:"spinner_active"`
 	SpinnerFrame  int             `json:"spinner_frame"`
 	SpinnerMsg    string          `json:"spinner_msg"`
+	SpinnerAnim   int             `json:"spinner_anim"`
 	OutputQueue   []string        `json:"output_queue,omitempty"`
 	Commands      []SlashCommand  `json:"commands"`
 	Suggestions   []SlashCommand  `json:"suggestions,omitempty"`
@@ -214,6 +215,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state.TurnCount++
 			m.state.SpinnerFrame = 0
 			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
+			m.state.SpinnerAnim = int(randomSpinnerAnim())
 			if !m.runtime.ticking {
 				m.runtime.ticking = true
 				return m, m.tickSpinner()
@@ -237,6 +239,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.SpinnerFrame++
 		if m.state.SpinnerFrame%100 == 0 {
 			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
+			m.state.SpinnerAnim = int(randomSpinnerAnim())
 		}
 		return m, m.tickSpinner()
 
@@ -434,14 +437,16 @@ func (m sessionModel) View() string {
 		}
 	}
 
-	// Spinner (when agent active) with elapsed time
+	// Spinner (when agent active) with animated message and elapsed time
 	if m.state.SpinnerActive {
 		bits := randomBinary(6)
+		localFrame := m.state.SpinnerFrame % 100
+		animatedMsg := renderAnimatedMsg(t, m.state.SpinnerMsg, spinnerAnimKind(m.state.SpinnerAnim), localFrame)
 		elapsed := ""
 		if !m.runtime.agentStartedAt.IsZero() {
-			elapsed = " (" + formatDuration(time.Since(m.runtime.agentStartedAt)) + ")"
+			elapsed = t.ANSIDim() + " (" + formatDuration(time.Since(m.runtime.agentStartedAt)) + ")" + t.ANSIReset()
 		}
-		fmt.Fprintf(&sb, "\n  %s%s%s %s%s%s%s\n", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), m.state.SpinnerMsg, elapsed, t.ANSIReset())
+		fmt.Fprintf(&sb, "\n  %s%s%s %s%s\n", t.ANSI(t.Primary), bits, t.ANSIReset(), animatedMsg, elapsed)
 	}
 
 	// Permission prompt (if in that state)
