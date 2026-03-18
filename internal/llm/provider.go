@@ -78,3 +78,26 @@ func DetectBackend(model, baseURL string) string {
 
 	return BackendOpenAIChat
 }
+
+// ProviderInfo returns a human-readable description of the provider configuration
+// for display in the welcome banner (e.g. "anthropic · stateless" or "openai-responses · websocket · stateful").
+func (cfg ProviderConfig) ProviderInfo() string {
+	backend := cfg.Backend
+	if backend == "" {
+		backend = DetectBackend(cfg.Model, cfg.BaseURL)
+	}
+
+	switch backend {
+	case BackendAnthropic:
+		return "anthropic"
+	case BackendOpenAIResponses:
+		if cfg.UseWebSocket {
+			return "openai-responses [websocket]"
+		}
+		return "openai-responses"
+	case BackendOpenAIChat:
+		return "openai-chat"
+	default:
+		return backend
+	}
+}

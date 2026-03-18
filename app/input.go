@@ -43,7 +43,7 @@ var inputKeys = inputKeyMap{
 }
 
 // printWelcomeBanner displays the small logo icon and startup info.
-func printWelcomeBanner(t *Theme, model, reasoning string) {
+func printWelcomeBanner(t *Theme, model, reasoning, providerInfo string) {
 	icon := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
 	name := lipgloss.NewStyle().Bold(true).Foreground(t.Primary)
 	dim := lipgloss.NewStyle().Foreground(t.Dim)
@@ -63,7 +63,7 @@ func printWelcomeBanner(t *Theme, model, reasoning string) {
 		dim.Render(model+" · "+reasoning))
 	fmt.Fprintf(os.Stderr, "  %s    %s\n",
 		icon.Render("▀▀  ▀▀"),
-		dim.Render(wd))
+		dim.Render(providerInfo+" · "+wd))
 	fmt.Fprintln(os.Stderr)
 }
 

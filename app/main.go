@@ -79,7 +79,7 @@ func main() {
 	if prompt != "" {
 		runSingleShot(agentConfig, themes, prompt)
 	} else {
-		runInteractive(agentConfig, themes)
+		runInteractive(agentConfig, themes, providerCfg.ProviderInfo())
 	}
 }
 
@@ -154,8 +154,8 @@ func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
 }
 
 // runInteractive runs the interactive REPL mode with a persistent TUI.
-func runInteractive(config *AgentConfig, themes *ThemeRegistry) {
-	printWelcomeBanner(themes.Active(), config.Model, config.Reasoning)
+func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo string) {
+	printWelcomeBanner(themes.Active(), config.Model, config.Reasoning, providerInfo)
 
 	slashCommands := buildSlashCommands(config)
 	submitCh := make(chan InputResult, 1)
