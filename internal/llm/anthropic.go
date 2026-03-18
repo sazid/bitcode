@@ -72,13 +72,18 @@ func (p *AnthropicProvider) Complete(ctx context.Context, params CompletionParam
 // --- Request building ---
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    json.RawMessage    `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream,omitempty"`
-	Thinking  *anthropicThinking `json:"thinking,omitempty"`
+	Model        string                `json:"model"`
+	MaxTokens    int                   `json:"max_tokens"`
+	System       json.RawMessage       `json:"system,omitempty"`
+	Messages     []anthropicMessage    `json:"messages"`
+	Tools        []anthropicTool       `json:"tools,omitempty"`
+	Stream       bool                  `json:"stream,omitempty"`
+	Thinking     *anthropicThinking    `json:"thinking,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
 }
 
 type anthropicThinking struct {
@@ -124,9 +129,10 @@ func (p *AnthropicProvider) buildRequest(params CompletionParams, stream bool) a
 	}
 
 	req := anthropicRequest{
-		Model:     params.Model,
-		MaxTokens: maxTokens,
-		Stream:    stream,
+		Model:        params.Model,
+		MaxTokens:    maxTokens,
+		Stream:       stream,
+		CacheControl: &anthropicCacheControl{Type: "ephemeral"},
 	}
 
 	// Extract system prompt
