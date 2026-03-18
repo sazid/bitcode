@@ -11,11 +11,11 @@ import (
 
 // AgentLifecycle manages the lifecycle of a single agent goroutine.
 type AgentLifecycle struct {
-	config  *AgentConfig
-	themes  *ThemeRegistry
-	p       *tea.Program
-	running bool
-	doneCh  chan struct{}
+	config   *AgentConfig
+	themes   *ThemeRegistry
+	p        *tea.Program
+	running  bool
+	doneCh   chan struct{}
 	injectCh chan string
 }
 

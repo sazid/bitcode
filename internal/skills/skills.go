@@ -3,6 +3,7 @@ package skills
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,6 @@ type Manager struct {
 	skills map[string]Skill
 	cfg    Config
 }
-
 
 // DefaultManager creates a Manager with the default "skills" subdirectory.
 // This is the convenience constructor for the main agent.
@@ -117,9 +117,7 @@ func skillFromContent(data []byte, filename, namePrefix, source string) Skill {
 
 	// Copy all frontmatter keys into Metadata (including the known ones)
 	metadata := make(map[string]any, len(raw))
-	for k, v := range raw {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, raw)
 
 	return Skill{
 		Name:        name,

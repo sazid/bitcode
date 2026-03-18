@@ -50,7 +50,6 @@ var defaultIgnoreDirs = map[string]bool{
 	".cache":        true,
 }
 
-
 // DiscoverInstructionFiles finds all CLAUDE.md and AGENTS.md files in projectDir
 // and user-level config directories.
 // In git repos, it uses "git ls-files" to respect .gitignore rules.

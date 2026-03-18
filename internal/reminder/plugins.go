@@ -1,6 +1,7 @@
 package reminder
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -124,10 +125,8 @@ func ParseConditionString(cond string) ConditionFunc {
 		tools := strings.Split(after, ",")
 		return func(state *ConversationState) bool {
 			for _, t := range tools {
-				for _, last := range state.LastToolCalls {
-					if strings.TrimSpace(t) == last {
-						return true
-					}
+				if slices.Contains(state.LastToolCalls, strings.TrimSpace(t)) {
+					return true
 				}
 			}
 			return false
