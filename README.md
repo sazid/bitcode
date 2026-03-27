@@ -151,6 +151,36 @@ BITCODE_BASE_URL=http://localhost:1234/v1 BITCODE_MODEL=local-model
 | `BITCODE_GUARD_PROVIDER` | Backend for guard agent | *(same as main)* |
 | `BITCODE_GUARD_MAX_TURNS` | Max turns for guard agent | unlimited |
 
+### Telemetry
+
+BitCode collects anonymized telemetry data to help improve the tool. Telemetry is **enabled by default** and can be disabled by setting the environment variable `BITCODE_TELEMETRY=false`.
+
+| Variable | Description | Default |
+|---|---|---|
+| `BITCODE_TELEMETRY` | Enable/disable telemetry collection | `true` (enabled by default) |
+
+**What is collected:**
+- LLM API calls: latency, token usage (input/output), cache hit rates, model/provider info
+- Tool executions: success/failure rates, latency, input/output sizes
+- Guard evaluations: verdicts, duration
+- Session metadata: start/end times, turn counts, mode (interactive/single-shot)
+- Errors: component and message (no stack traces or user data)
+
+**Where is data stored?**
+Telemetry data is stored as JSONL files in `~/.bitcode/telemetry/`. Files are rotated daily (e.g., `2026-03-28.jsonl`).
+
+**Viewing telemetry:**
+In interactive mode, use the `/stats` command to see current session telemetry metrics.
+
+**Privacy:**
+Telemetry does not collect:
+- Prompt or response content
+- File paths or code snippets
+- Personal identifiable information
+- API keys or secrets
+
+The data is used solely to understand usage patterns, identify bugs, and guide development priorities.
+
 ## Interactive Mode Keys
 
 | Key | Action |
