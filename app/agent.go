@@ -10,6 +10,7 @@ import (
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/skills"
+	"github.com/sazid/bitcode/internal/telemetry"
 	"github.com/sazid/bitcode/internal/tools"
 )
 
@@ -29,6 +30,8 @@ type AgentConfig struct {
 	TaskTitle        string      // Current task title for notifications
 	InstructionFiles []string    // Discovered CLAUDE.md/AGENTS.md relative paths
 	InjectedMessages chan string // optional; user messages injected mid-flight
+	Observer         telemetry.Observer
+	TurnCounter      *telemetry.TurnCounter
 }
 
 type AgentCallbacks struct {
@@ -76,14 +79,17 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 
 	startTime := time.Now()
 	var lastToolNames []string
-	var responseID string     // for StatefulProvider (Responses API)
-	var prevMessageCount int  // messages already covered by previous_response_id
+	var responseID string    // for StatefulProvider (Responses API)
+	var prevMessageCount int // messages already covered by previous_response_id
 
 	maxTurns := cfg.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = defaultMaxAgentTurns
 	}
 	for turn := 0; turn < maxTurns; turn++ {
+		if cfg.TurnCounter != nil {
+			cfg.TurnCounter.Set(turn)
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -99,7 +105,7 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					systemMsg,
 					llm.TextMessage(llm.RoleUser, fmt.Sprintf("<context>\nThis is a summary of the conversation so far. The full history has been compacted to free up context space.\n\n%s\n</context>\n\nThe conversation was compacted. Continue assisting based on the summary above.", summary)),
 				}
-				responseID = ""       // reset stateful chain after compaction
+				responseID = "" // reset stateful chain after compaction
 				prevMessageCount = 0
 				eventsCh <- internal.Event{
 					Name:    "Compact",
@@ -181,6 +187,9 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 		if err != nil {
 			if ctx.Err() != nil {
 				return
+			}
+			if cfg.Observer != nil {
+				cfg.Observer.RecordError(turn, "llm", err.Error(), "agent_loop")
 			}
 			if cb.OnError != nil {
 				cb.OnError(err)

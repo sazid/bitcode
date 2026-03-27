@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/notify"
+	"github.com/sazid/bitcode/internal/telemetry"
 	"github.com/sazid/bitcode/internal/tools"
 	"github.com/sazid/bitcode/internal/version"
 )
@@ -62,24 +65,49 @@ func main() {
 		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
 	}
 
+	// Set up telemetry observer
+	var observer telemetry.Observer = telemetry.NoopObserver{}
+	turnCounter := telemetry.NewTurnCounter()
+	sessionID := randomHex(4)
+
+	if os.Getenv("BITCODE_TELEMETRY") != "false" {
+		store, err := telemetry.NewStore(telemetry.DefaultDir())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: telemetry disabled (%v)\n", err)
+		} else {
+			observer = telemetry.NewCollector(sessionID, store)
+		}
+	}
+
+	// Wrap provider, tools, and guard with telemetry
+	wrappedProvider := telemetry.WrapProvider(provider, observer, turnCounter, providerCfg.ProviderInfo())
+	wrappedTools := telemetry.WrapToolRegistry(toolManager, observer, turnCounter)
+	wrappedGuard := telemetry.WrapGuardEvaluator(guardMgr, observer, turnCounter)
+
 	agentConfig := &AgentConfig{
-		Provider:         provider,
+		Provider:         wrappedProvider,
 		Model:            model,
 		Reasoning:        reasoningEffort,
 		MaxTurns:         maxTurns,
-		ToolManager:      toolManager,
+		ToolManager:      wrappedTools,
 		SkillManager:     skillManager,
 		ReminderMgr:      reminderMgr,
-		GuardMgr:         guardMgr,
+		GuardMgr:         wrappedGuard,
 		TodoStore:        todoStore,
 		CompactState:     compactState,
 		InstructionFiles: instructionFiles,
+		Observer:         observer,
+		TurnCounter:      turnCounter,
 	}
 
 	if prompt != "" {
+		observer.RecordSessionStart("single-shot")
 		runSingleShot(agentConfig, themes, prompt)
+		observer.Close()
 	} else {
-		runInteractive(agentConfig, themes, providerCfg.ProviderInfo())
+		observer.RecordSessionStart("interactive")
+		runInteractive(agentConfig, themes, providerCfg.ProviderInfo(), guardMgr)
+		observer.Close()
 	}
 }
 
@@ -154,7 +182,7 @@ func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
 }
 
 // runInteractive runs the interactive REPL mode with a persistent TUI.
-func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo string) {
+func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo string, guardMgr *guard.Manager) {
 	printWelcomeBanner(themes.Active(), config.Model, config.Reasoning, providerInfo)
 
 	slashCommands := buildSlashCommands(config)
@@ -164,8 +192,8 @@ func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo str
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 	// Set up interactive permission handler (needs the tea.Program reference)
-	if gm, ok := config.GuardMgr.(*guard.Manager); ok {
-		gm.SetPermissionHandler(func(toolName string, decision guard.Decision) guard.PermissionResult {
+	if guardMgr != nil {
+		guardMgr.SetPermissionHandler(func(toolName string, decision guard.Decision) guard.PermissionResult {
 			title := "BitCode"
 			if t := config.TaskTitle; t != "" {
 				title = "BitCode: " + notify.Truncate(t, 40)
@@ -231,6 +259,7 @@ func buildSlashCommands(config *AgentConfig) []SlashCommand {
 		{Name: "reasoning", Description: "Set reasoning effort (none/low/medium/high/xhigh)", Source: "builtin"},
 		{Name: "turns", Description: "Get or set max agent turns", Source: "builtin"},
 		{Name: "theme", Description: "Switch theme (dark/light/mono)", Source: "builtin"},
+		{Name: "stats", Description: "Show session telemetry stats", Source: "builtin"},
 		{Name: "help", Description: "Show available commands", Source: "builtin"},
 		{Name: "exit", Description: "Exit BitCode", Source: "builtin"},
 		{Name: "quit", Description: "Exit BitCode", Source: "builtin"},
@@ -243,4 +272,10 @@ func buildSlashCommands(config *AgentConfig) []SlashCommand {
 		})
 	}
 	return commands
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

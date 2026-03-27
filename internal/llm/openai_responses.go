@@ -245,10 +245,21 @@ func convertToResponsesInput(msgs []Message) []responsesInputItem {
 
 // --- Sync response handling ---
 
+type responsesUsageDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+type responsesUsage struct {
+	InputTokens        int                    `json:"input_tokens"`
+	OutputTokens       int                    `json:"output_tokens"`
+	InputTokensDetails *responsesUsageDetails `json:"input_tokens_details,omitempty"`
+}
+
 type responsesResponse struct {
 	ID     string                `json:"id"`
 	Status string                `json:"status"`
 	Output []responsesOutputItem `json:"output"`
+	Usage  *responsesUsage       `json:"usage,omitempty"`
 }
 
 type responsesOutputItem struct {
@@ -302,13 +313,23 @@ func responsesToCompletion(resp responsesResponse) *StatefulCompletionResponse {
 		finishReason = FinishToolCalls
 	}
 
-	return &StatefulCompletionResponse{
+	result := &StatefulCompletionResponse{
 		CompletionResponse: CompletionResponse{
 			Message:      msg,
 			FinishReason: finishReason,
 		},
 		ResponseID: resp.ID,
 	}
+	if resp.Usage != nil {
+		result.Usage = Usage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+		}
+		if resp.Usage.InputTokensDetails != nil {
+			result.Usage.CacheRead = resp.Usage.InputTokensDetails.CachedTokens
+		}
+	}
+	return result
 }
 
 // --- Streaming response handling ---

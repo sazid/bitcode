@@ -103,9 +103,18 @@ type CompletionParams struct {
 	MaxTokens       int    // required by Anthropic; optional for OpenAI
 }
 
+// Usage tracks token consumption for a single LLM call.
+type Usage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	CacheRead    int `json:"cache_read,omitempty"`
+	CacheCreate  int `json:"cache_create,omitempty"`
+}
+
 type CompletionResponse struct {
 	Message      Message
 	FinishReason FinishReason
+	Usage        Usage
 }
 
 // DeltaType identifies the kind of content in a StreamDelta.

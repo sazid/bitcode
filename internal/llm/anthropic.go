@@ -72,13 +72,13 @@ func (p *AnthropicProvider) Complete(ctx context.Context, params CompletionParam
 // --- Request building ---
 
 type anthropicRequest struct {
-	Model        string                `json:"model"`
-	MaxTokens    int                   `json:"max_tokens"`
-	System       json.RawMessage       `json:"system,omitempty"`
-	Messages     []anthropicMessage    `json:"messages"`
-	Tools        []anthropicTool       `json:"tools,omitempty"`
-	Stream       bool                  `json:"stream,omitempty"`
-	Thinking     *anthropicThinking    `json:"thinking,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       json.RawMessage        `json:"system,omitempty"`
+	Messages     []anthropicMessage     `json:"messages"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	Stream       bool                   `json:"stream,omitempty"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
@@ -291,12 +291,20 @@ func convertContentBlocks(m Message) []anthropicContent {
 
 // --- Sync response handling ---
 
+type anthropicUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+}
+
 type anthropicResponse struct {
 	ID         string             `json:"id"`
 	Type       string             `json:"type"`
 	Role       string             `json:"role"`
 	Content    []anthropicContent `json:"content"`
 	StopReason string             `json:"stop_reason"`
+	Usage      anthropicUsage     `json:"usage"`
 }
 
 func (p *AnthropicProvider) handleSync(body io.Reader) (*CompletionResponse, error) {
@@ -334,6 +342,12 @@ func anthropicResponseToCompletion(resp anthropicResponse) *CompletionResponse {
 	return &CompletionResponse{
 		Message:      msg,
 		FinishReason: finishReason,
+		Usage: Usage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
+			CacheRead:    resp.Usage.CacheReadInputTokens,
+			CacheCreate:  resp.Usage.CacheCreationInputTokens,
+		},
 	}
 }
 
@@ -346,6 +360,7 @@ type anthropicStreamEvent struct {
 	ContentBlock *anthropicContent  `json:"content_block,omitempty"`
 	Delta        *anthropicDelta    `json:"delta,omitempty"`
 	Message      *anthropicResponse `json:"message,omitempty"`
+	Usage        *anthropicUsage    `json:"usage,omitempty"`
 }
 
 type anthropicDelta struct {
@@ -361,6 +376,7 @@ func (p *AnthropicProvider) handleStream(body io.Reader, onDelta func(StreamDelt
 
 	msg := Message{Role: RoleAssistant}
 	var stopReason string
+	var usage Usage
 
 	// Track active content blocks by index
 	type blockState struct {
@@ -444,9 +460,19 @@ func (p *AnthropicProvider) handleStream(body io.Reader, onDelta func(StreamDelt
 			}
 			delete(blocks, ev.Index)
 
+		case "message_start":
+			if ev.Message != nil {
+				usage.InputTokens = ev.Message.Usage.InputTokens
+				usage.CacheRead = ev.Message.Usage.CacheReadInputTokens
+				usage.CacheCreate = ev.Message.Usage.CacheCreationInputTokens
+			}
+
 		case "message_delta":
 			if ev.Delta != nil && ev.Delta.StopReason != "" {
 				stopReason = ev.Delta.StopReason
+			}
+			if ev.Usage != nil {
+				usage.OutputTokens = ev.Usage.OutputTokens
 			}
 
 		case "message_stop":
@@ -462,5 +488,6 @@ func (p *AnthropicProvider) handleStream(body io.Reader, onDelta func(StreamDelt
 	return &CompletionResponse{
 		Message:      msg,
 		FinishReason: finishReason,
+		Usage:        usage,
 	}, nil
 }

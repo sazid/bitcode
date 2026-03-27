@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/telemetry"
 )
 
 // CommandDispatcher handles built-in slash commands and skill routing.
@@ -51,7 +52,11 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 		} else {
 			d.config.TodoStore.Clear()
 			resetConversation()
-			d.p.Send(newConversationMsg{taskID: GenerateTaskID()})
+			newTaskID := GenerateTaskID()
+			if d.config.Observer != nil {
+				d.config.Observer.ResetSession(newTaskID)
+			}
+			d.p.Send(newConversationMsg{taskID: newTaskID})
 			d.p.Send(appendOutputMsg(successStyle().Render("\n  \u2713 Started new conversation")))
 		}
 		return DispatchResult{Handled: true}
@@ -75,6 +80,16 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 
 	case "/theme":
 		d.handleTheme(cmdArgs, dimStyle, errorStyle, successStyle)
+		return DispatchResult{Handled: true}
+
+	case "/stats":
+		if d.config.Observer != nil {
+			stats := d.config.Observer.Stats()
+			text := telemetry.FormatStats(stats)
+			d.p.Send(appendOutputMsg(dimStyle().Render(text)))
+		} else {
+			d.p.Send(appendOutputMsg(dimStyle().Render("\n  Telemetry not enabled")))
+		}
 		return DispatchResult{Handled: true}
 
 	default:

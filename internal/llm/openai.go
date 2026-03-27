@@ -37,7 +37,17 @@ func (p *OpenAIProvider) completeSync(ctx context.Context, params CompletionPara
 		return nil, fmt.Errorf("no choices in response")
 	}
 
-	return responseFromChoice(resp.Choices[0]), nil
+	result := responseFromChoice(resp.Choices[0])
+	if resp.Usage.PromptTokens != 0 || resp.Usage.CompletionTokens != 0 {
+		result.Usage = Usage{
+			InputTokens:  int(resp.Usage.PromptTokens),
+			OutputTokens: int(resp.Usage.CompletionTokens),
+		}
+		if resp.Usage.PromptTokensDetails.CachedTokens != 0 {
+			result.Usage.CacheRead = int(resp.Usage.PromptTokensDetails.CachedTokens)
+		}
+	}
+	return result, nil
 }
 
 func (p *OpenAIProvider) completeStream(ctx context.Context, params CompletionParams, onDelta func(StreamDelta)) (*CompletionResponse, error) {
@@ -86,7 +96,17 @@ func (p *OpenAIProvider) completeStream(ctx context.Context, params CompletionPa
 		return nil, fmt.Errorf("no choices in streamed response")
 	}
 
-	return responseFromChoice(acc.Choices[0]), nil
+	result := responseFromChoice(acc.Choices[0])
+	if acc.Usage.PromptTokens != 0 || acc.Usage.CompletionTokens != 0 {
+		result.Usage = Usage{
+			InputTokens:  int(acc.Usage.PromptTokens),
+			OutputTokens: int(acc.Usage.CompletionTokens),
+		}
+		if acc.Usage.PromptTokensDetails.CachedTokens != 0 {
+			result.Usage.CacheRead = int(acc.Usage.PromptTokensDetails.CachedTokens)
+		}
+	}
+	return result, nil
 }
 
 func buildOpenAIParams(params CompletionParams) openai.ChatCompletionNewParams {
