@@ -256,6 +256,17 @@ func TestGenerateID(t *testing.T) {
 	}
 }
 
+func TestGenerateIDUniqueness(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		id := generateID()
+		if seen[id] {
+			t.Fatalf("duplicate ID after %d generations: %s", i, id)
+		}
+		seen[id] = true
+	}
+}
+
 func TestTruncateTitle(t *testing.T) {
 	short := "Short title"
 	long := "This is a very long title that should be truncated because it exceeds the maximum length allowed"

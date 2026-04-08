@@ -381,16 +381,12 @@ func generateID() string {
 	adjectives := []string{"swift", "bright", "calm", "bold", "cool", "keen", "quiet", "grand"}
 	nouns := []string{"falcon", "eagle", "hawk", "owl", "wolf", "bear", "lynx", "stag"}
 
-	now := time.Now()
-	nano := now.UnixNano()
-
-	adj := adjectives[nano%int64(len(adjectives))]
-	noun := nouns[(nano/100)%int64(len(nouns))]
-
-	// Generate random suffix for uniqueness
-	b := make([]byte, 3)
+	b := make([]byte, 5)
 	rand.Read(b)
-	suffix := hex.EncodeToString(b)[:6]
+
+	adj := adjectives[int(b[0])%len(adjectives)]
+	noun := nouns[int(b[1])%len(nouns)]
+	suffix := hex.EncodeToString(b[2:])
 
 	return fmt.Sprintf("%s-%s-%s", adj, noun, suffix)
 }
