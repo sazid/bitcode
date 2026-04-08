@@ -352,6 +352,32 @@ func TestMessageCountComputedOnLoad(t *testing.T) {
 	}
 }
 
+func TestConcurrentListAndAppend(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	conv, _ := mgr.Create("Concurrent Test")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleUser, fmt.Sprintf("msg %d", i)))
+		}
+	}()
+
+	for i := 0; i < 50; i++ {
+		_, err := mgr.List()
+		if err != nil {
+			t.Errorf("List failed: %v", err)
+		}
+	}
+	<-done
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

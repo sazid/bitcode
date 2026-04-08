@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,15 +78,7 @@ func (m *Manager) Create(title string) (*Conversation, error) {
 func (m *Manager) Load(id string) (*Conversation, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	path := filepath.Join(m.dir, id+".jsonl")
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open conversation: %w", err)
-	}
-	defer file.Close()
-
-	return m.loadFromFileLocked(file)
+	return m.loadByIDLocked(id)
 }
 
 // LoadMetadata loads only the metadata for a conversation.
@@ -99,7 +92,6 @@ func (m *Manager) LoadMetadata(id string) (*Metadata, error) {
 		return nil, fmt.Errorf("open conversation: %w", err)
 	}
 	defer file.Close()
-
 	return m.loadMetadataLocked(file)
 }
 
@@ -150,21 +142,22 @@ func (m *Manager) List() ([]Metadata, error) {
 		}
 
 		id := strings.TrimSuffix(entry.Name(), ".jsonl")
-		meta, err := m.LoadMetadata(id)
+		path := filepath.Join(m.dir, id+".jsonl")
+		file, err := os.Open(path)
 		if err != nil {
-			continue // skip invalid files
+			continue
+		}
+		meta, err := m.loadMetadataLocked(file)
+		file.Close()
+		if err != nil {
+			continue
 		}
 		metas = append(metas, *meta)
 	}
 
-	// Sort by UpdatedAt descending
-	for i := 0; i < len(metas)-1; i++ {
-		for j := i + 1; j < len(metas); j++ {
-			if metas[i].UpdatedAt.Before(metas[j].UpdatedAt) {
-				metas[i], metas[j] = metas[j], metas[i]
-			}
-		}
-	}
+	sort.Slice(metas, func(i, j int) bool {
+		return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
+	})
 
 	return metas, nil
 }
@@ -176,25 +169,35 @@ func (m *Manager) Search(query string) ([]SearchResult, error) {
 	defer m.mu.RUnlock()
 
 	query = strings.ToLower(query)
-	metas, err := m.List()
+
+	entries, err := os.ReadDir(m.dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read conversations dir: %w", err)
 	}
 
 	var results []SearchResult
-	for _, meta := range metas {
-		conv, err := m.Load(meta.ID)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+
+		id := strings.TrimSuffix(entry.Name(), ".jsonl")
+		conv, err := m.loadByIDLocked(id)
 		if err != nil {
 			continue
 		}
 
 		if matches := searchMessages(conv.Messages, query); len(matches) > 0 {
 			results = append(results, SearchResult{
-				Metadata: meta,
+				Metadata: conv.Metadata,
 				Matches:  matches,
 			})
 		}
 	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].UpdatedAt.After(results[j].UpdatedAt)
+	})
 
 	return results, nil
 }
@@ -208,7 +211,10 @@ type SearchResult struct {
 // Fork creates a new conversation from an existing one, copying messages up to (but not including) msgIdx.
 // If msgIdx is -1 or >= len(messages), all messages are copied.
 func (m *Manager) Fork(sourceID string, newTitle string, msgIdx int) (*Conversation, error) {
-	source, err := m.Load(sourceID)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	source, err := m.loadByIDLocked(sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -220,18 +226,15 @@ func (m *Manager) Fork(sourceID string, newTitle string, msgIdx int) (*Conversat
 	now := time.Now()
 	forked := &Conversation{
 		Metadata: Metadata{
-			ID:        generateID(),
-			Title:     truncateTitle(newTitle),
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:           generateID(),
+			Title:        truncateTitle(newTitle),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			MessageCount: msgIdx,
 		},
 		Messages: make([]llm.Message, msgIdx),
 	}
 	copy(forked.Messages, source.Messages[:msgIdx])
-	forked.MessageCount = len(forked.Messages)
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if err := m.saveLocked(forked); err != nil {
 		return nil, err
