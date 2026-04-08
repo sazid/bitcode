@@ -5,8 +5,28 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
+
+// isShellTool reports whether the given tool name is a shell execution tool.
+// The tool is registered as "Bash" on Unix and "PowerShell" on Windows.
+func isShellTool(name string) bool {
+	return name == "Bash" || name == "PowerShell"
+}
+
+// shellPathRe matches absolute paths in shell commands.
+// On Windows it matches drive-letter paths (C:\...) and UNC paths (\\...).
+// On Unix it matches paths starting with /.
+var shellPathRe *regexp.Regexp
+
+func init() {
+	if runtime.GOOS == "windows" {
+		shellPathRe = regexp.MustCompile(`(?i)(?:^|[\s;|&>"'])([A-Za-z]:\\[^\s;|&>"']*|\\\\[^\s;|&>"']+)`)
+	} else {
+		shellPathRe = regexp.MustCompile(`(?:^|[\s;|&>"'])(/[^\s;|&>"']+)`)
+	}
+}
 
 // --- WorkingDirRule ---
 
@@ -17,7 +37,7 @@ func (r *WorkingDirRule) Evaluate(ctx *EvalContext) *Decision {
 	switch ctx.ToolName {
 	case "Read", "Write", "Edit", "Glob":
 		return r.checkFileTool(ctx)
-	case "Bash":
+	case "Bash", "PowerShell":
 		return r.checkBash(ctx)
 	default:
 		return nil
@@ -55,11 +75,17 @@ func (r *WorkingDirRule) checkFileTool(ctx *EvalContext) *Decision {
 	return nil
 }
 
-// bashWriteCommands are commands that modify the filesystem.
-var bashWriteCommands = map[string]bool{
+// shellWriteCommands are commands that modify the filesystem (Unix and PowerShell).
+var shellWriteCommands = map[string]bool{
+	// Unix
 	"rm": true, "mv": true, "cp": true, "chmod": true,
 	"mkdir": true, "rmdir": true, "tee": true, "dd": true,
 	"chown": true, "touch": true,
+	// PowerShell cmdlets (first word / alias)
+	"Remove-Item": true, "Move-Item": true, "Copy-Item": true,
+	"New-Item": true, "Rename-Item": true,
+	"Set-Content": true, "Add-Content": true, "Out-File": true,
+	"Clear-Content": true,
 }
 
 func (r *WorkingDirRule) checkBash(ctx *EvalContext) *Decision {
@@ -68,9 +94,7 @@ func (r *WorkingDirRule) checkBash(ctx *EvalContext) *Decision {
 		return nil
 	}
 
-	// Find absolute paths in the command
-	pathRe := regexp.MustCompile(`(?:^|[\s;|&>"'])(/[^\s;|&>"']+)`)
-	matches := pathRe.FindAllStringSubmatch(cmd, -1)
+	matches := shellPathRe.FindAllStringSubmatch(cmd, -1)
 
 	for _, m := range matches {
 		absPath := filepath.Clean(m[1])
@@ -80,10 +104,10 @@ func (r *WorkingDirRule) checkBash(ctx *EvalContext) *Decision {
 
 		// Check if the command is write-oriented
 		cmdName := extractFirstWord(cmd)
-		if bashWriteCommands[cmdName] {
+		if shellWriteCommands[cmdName] {
 			return &Decision{
 				Verdict: VerdictAsk,
-				Reason:  fmt.Sprintf("Bash command modifies %s which is outside working directory %s", absPath, ctx.WorkingDir),
+				Reason:  fmt.Sprintf("Shell command modifies %s which is outside working directory %s", absPath, ctx.WorkingDir),
 			}
 		}
 	}
@@ -96,22 +120,33 @@ func (r *WorkingDirRule) checkBash(ctx *EvalContext) *Decision {
 // DangerousCommandRule catches dangerous shell commands.
 type DangerousCommandRule struct{}
 
-// Patterns that are always denied.
+// Patterns that are always denied (Unix + PowerShell).
 var denyPatterns = []*regexp.Regexp{
+	// Unix: rm -rf /  rm -rf ~  rm -rf $HOME
 	regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|(-[a-zA-Z]*f[a-zA-Z]*r))\s+/\s*$`),
 	regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|(-[a-zA-Z]*f[a-zA-Z]*r))\s+~\s*$`),
 	regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|(-[a-zA-Z]*f[a-zA-Z]*r))\s+\$HOME\b`),
+	// Unix: mkfs, dd to block device, fork bomb, chmod 777 /
 	regexp.MustCompile(`\bmkfs\b`),
 	regexp.MustCompile(`\bdd\b.*\bof=/dev/`),
-	regexp.MustCompile(`:\(\)\{.*\|.*\};:`), // fork bomb
+	regexp.MustCompile(`:\(\)\{.*\|.*\};:`),
 	regexp.MustCompile(`\bchmod\s+-R\s+777\s+/\s*$`),
+	// PowerShell: Remove-Item -Recurse -Force targeting a drive root or system dirs
+	regexp.MustCompile(`(?i)\bRemove-Item\b.*-Recurse.*-Force\s+[A-Za-z]:\\\s*$`),
+	regexp.MustCompile(`(?i)\bRemove-Item\b.*-Force.*-Recurse\s+[A-Za-z]:\\\s*$`),
+	// PowerShell: Remove-Item on home directory
+	regexp.MustCompile(`(?i)\bRemove-Item\b.*\$env:USERPROFILE\b`),
+	regexp.MustCompile(`(?i)\bRemove-Item\b.*\$HOME\b`),
+	// PowerShell: Format-Volume (disk format)
+	regexp.MustCompile(`(?i)\bFormat-Volume\b`),
 }
 
-// Patterns that require user approval.
+// Patterns that require user approval (Unix + PowerShell).
 var askPatterns = []struct {
 	re     *regexp.Regexp
 	reason string
 }{
+	// Unix patterns
 	{regexp.MustCompile(`\bsudo\b`), "sudo command requires approval"},
 	{regexp.MustCompile(`\bcurl\b.*\|\s*(ba)?sh`), "pipe-to-shell is dangerous"},
 	{regexp.MustCompile(`\bwget\b.*\|\s*(ba)?sh`), "pipe-to-shell is dangerous"},
@@ -122,10 +157,17 @@ var askPatterns = []struct {
 	{regexp.MustCompile(`\bcargo\s+publish\b`), "publishing packages requires approval"},
 	{regexp.MustCompile(`\bdocker\s+run\b`), "docker run requires approval"},
 	{regexp.MustCompile(`\bdocker\s+exec\b`), "docker exec requires approval"},
+	// PowerShell: Invoke-Expression / iex (arbitrary code execution)
+	{regexp.MustCompile(`(?i)\bInvoke-Expression\b|\biex\b`), "Invoke-Expression can execute arbitrary code"},
+	// PowerShell: download-and-execute (iwr/irm | iex)
+	{regexp.MustCompile(`(?i)\b(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b.*\|\s*(Invoke-Expression|iex)\b`), "download-and-execute is dangerous"},
+	{regexp.MustCompile(`(?i)\b(Invoke-Expression|iex)\s*\(?\s*(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b`), "download-and-execute is dangerous"},
+	// PowerShell: Start-Process as Administrator
+	{regexp.MustCompile(`(?i)\bStart-Process\b.*-Verb\s+RunAs\b`), "running as Administrator requires approval"},
 }
 
 func (r *DangerousCommandRule) Evaluate(ctx *EvalContext) *Decision {
-	if ctx.ToolName != "Bash" {
+	if !isShellTool(ctx.ToolName) {
 		return nil
 	}
 
@@ -221,16 +263,39 @@ func (r *SensitiveFileRule) Evaluate(ctx *EvalContext) *Decision {
 // DefaultPolicyRule provides baseline policy when no other rule fires.
 type DefaultPolicyRule struct{}
 
-// Known-safe bash command prefixes that skip the guard.
-var safeBashPrefixes = []string{
-	"echo ", "pwd", "which ", "env", "printenv",
-	"ls ", "ls\n", "cat ", "head ", "tail ", "wc ", "sort ", "uniq ", "diff ",
-	"git status", "git log", "git diff", "git branch", "git show", "git stash",
-	"go build", "go test", "go run", "go vet", "go fmt", "go mod tidy",
-	"npm test", "npm run", "npm ci", "npm install",
-	"cargo build", "cargo test", "cargo check",
-	"make", "cmake",
-	"grep ", "rg ", "ag ", "fd ", "find ",
+// safePrefixes lists known-safe shell command prefixes.
+// Populated at init time so it can be platform-aware.
+var safePrefixes []string
+
+func init() {
+	common := []string{
+		"echo ", "pwd",
+		"git status", "git log", "git diff", "git branch", "git show", "git stash",
+		"go build", "go test", "go run", "go vet", "go fmt", "go mod tidy",
+		"npm test", "npm run", "npm ci", "npm install",
+		"cargo build", "cargo test", "cargo check",
+		"make", "cmake",
+		"grep ", "rg ",
+	}
+	if runtime.GOOS == "windows" {
+		safePrefixes = append(common,
+			// PowerShell-specific safe read-only / query commands
+			"Get-ChildItem", "gci ", "dir ", "ls ",
+			"Get-Content ", "gc ",
+			"Write-Output ", "Write-Host ",
+			"Get-Location", "cd ",
+			"Test-Path ", "Get-Item ",
+			"Select-String ",
+			"where ", "where.exe ",
+			"$PSVersionTable", "$env:",
+		)
+	} else {
+		safePrefixes = append(common,
+			"which ", "env", "printenv",
+			"ls ", "ls\n", "cat ", "head ", "tail ", "wc ", "sort ", "uniq ", "diff ",
+			"find ", "fd ", "ag ",
+		)
+	}
 }
 
 func (r *DefaultPolicyRule) Evaluate(ctx *EvalContext) *Decision {
@@ -239,14 +304,14 @@ func (r *DefaultPolicyRule) Evaluate(ctx *EvalContext) *Decision {
 		return &Decision{Verdict: VerdictAllow, Reason: "read-only tool"}
 	case "Write", "Edit":
 		return &Decision{Verdict: VerdictAllow, Reason: "file write in working directory"}
-	case "Bash":
+	case "Bash", "PowerShell":
 		cmd := extractCommand(ctx)
 		if cmd == "" {
 			return &Decision{Verdict: VerdictAllow, Reason: "empty command"}
 		}
 
 		trimmed := strings.TrimSpace(cmd)
-		for _, prefix := range safeBashPrefixes {
+		for _, prefix := range safePrefixes {
 			if strings.HasPrefix(trimmed, prefix) || trimmed == strings.TrimSpace(prefix) {
 				return &Decision{Verdict: VerdictAllow, Reason: "known-safe command"}
 			}
@@ -254,7 +319,7 @@ func (r *DefaultPolicyRule) Evaluate(ctx *EvalContext) *Decision {
 
 		return &Decision{
 			Verdict: VerdictLLM,
-			Reason:  fmt.Sprintf("unknown bash command needs validation: %s", truncate(cmd, 80)),
+			Reason:  fmt.Sprintf("unknown shell command needs validation: %s", truncate(cmd, 80)),
 		}
 	default:
 		return &Decision{Verdict: VerdictAllow, Reason: "unknown tool, default allow"}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/sazid/bitcode/internal/plugin"
@@ -125,11 +127,13 @@ func TestWorkingDirRule_FileOutsideCwd(t *testing.T) {
 }
 
 func TestWorkingDirRule_FileInsideCwd(t *testing.T) {
+	// Use real absolute paths so filepath.Abs resolves consistently on all platforms.
+	dir := t.TempDir()
 	rule := &WorkingDirRule{}
 	ctx := &EvalContext{
 		ToolName:   "Write",
-		Input:      json.RawMessage(fileInput("/home/user/project/src/main.go")),
-		WorkingDir: "/home/user/project",
+		Input:      json.RawMessage(fileInput(filepath.Join(dir, "src", "main.go"))),
+		WorkingDir: dir,
 	}
 	d := rule.Evaluate(ctx)
 	if d != nil {
@@ -138,15 +142,27 @@ func TestWorkingDirRule_FileInsideCwd(t *testing.T) {
 }
 
 func TestWorkingDirRule_BashWriteOutsideCwd(t *testing.T) {
+	// Use real absolute paths so the shell-path regex works on all platforms.
+	projectDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "old-builds")
+
+	var cmd string
+	if runtime.GOOS == "windows" {
+		cmd = "Remove-Item " + outsidePath
+	} else {
+		cmd = "rm " + outsidePath
+	}
+
 	rule := &WorkingDirRule{}
 	ctx := &EvalContext{
 		ToolName:   "Bash",
-		Input:      json.RawMessage(bashInput("rm /tmp/old-builds")),
-		WorkingDir: "/home/user/project",
+		Input:      json.RawMessage(bashInput(cmd)),
+		WorkingDir: projectDir,
 	}
 	d := rule.Evaluate(ctx)
 	if d == nil || d.Verdict != VerdictAsk {
-		t.Errorf("expected Ask for rm outside cwd, got %v", d)
+		t.Errorf("expected Ask for write outside cwd, got %v", d)
 	}
 }
 

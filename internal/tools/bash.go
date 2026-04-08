@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -23,11 +24,24 @@ type BashTool struct{}
 
 var _ Tool = (*BashTool)(nil)
 
+// Name returns the tool name exposed to the LLM.
+// On Windows it is "PowerShell"; on Unix it is "Bash".
 func (b *BashTool) Name() string {
+	if runtime.GOOS == "windows" {
+		return "PowerShell"
+	}
 	return "Bash"
 }
 
 func (b *BashTool) Description() string {
+	if runtime.GOOS == "windows" {
+		return powershellToolDescription()
+	}
+	return bashToolDescription()
+}
+
+// bashToolDescription is the original Unix/bash description.
+func bashToolDescription() string {
 	return `Executes a given bash command and returns its output.
 
 The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's profile (bash or zsh).
@@ -39,7 +53,7 @@ IMPORTANT: Avoid using this tool to run ` + "`find`" + `, ` + "`cat`" + `, ` + "
  - Edit files: Use Edit (NOT sed/awk)
  - Write files: Use Write (NOT echo >/cat <<EOF)
  - Communication: Output text directly (NOT echo/printf)
-While the Bash tool can do similar things, it's better to use the built-in tools as they provide a better user experience and make it easier to review tool calls and give permission.
+While the Bash tool can do similar things, it's better to use the built-in tools as they provide a much better experience for the user and make it easier to review tool calls and give permission.
 
 # Instructions
  - If your command will create new directories or files, first use this tool to run ` + "`ls`" + ` to verify the parent directory exists and is the correct location.
@@ -57,6 +71,41 @@ While the Bash tool can do similar things, it's better to use the built-in tools
   - Before running destructive operations (e.g., git reset --hard, git push --force, git checkout --), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.
   - Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.
  - Avoid unnecessary ` + "`sleep`" + ` commands:
+  - Do not sleep between commands that can run immediately — just run them.
+  - Do not retry failing commands in a sleep loop — diagnose the root cause or consider an alternative approach.
+  - If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.`
+}
+
+// powershellToolDescription is the Windows/PowerShell variant of the tool description.
+func powershellToolDescription() string {
+	return `Executes a given PowerShell command and returns its output.
+
+The working directory persists between commands, but shell state does not. The shell environment is initialized from the user's PowerShell profile.
+
+IMPORTANT: Avoid using this tool to run ` + "`Get-ChildItem`" + `, ` + "`Get-Content`" + `, ` + "`Select-String`" + `, or ` + "`Write-Output`" + ` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user:
+
+ - File search: Use Glob (NOT Get-ChildItem/ls/dir)
+ - Read files: Use Read (NOT Get-Content/cat)
+ - Edit files: Use Edit (NOT (Get-Content ... | Set-Content))
+ - Write files: Use Write (NOT Out-File/Set-Content)
+ - Communication: Output text directly (NOT Write-Output/Write-Host)
+While the PowerShell tool can do similar things, it's better to use the built-in tools as they provide a much better experience for the user and make it easier to review tool calls and give permission.
+
+# Instructions
+ - If your command will create new directories or files, first use this tool to run ` + "`ls`" + ` to verify the parent directory exists and is the correct location.
+ - Always quote file paths that contain spaces with double quotes in your command (e.g., cd "path with spaces")
+ - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of ` + "`Set-Location`" + `/` + "`cd`" + `. You may use ` + "`cd`" + ` if the User explicitly requests it.
+ - You may specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). By default, your command will timeout after 120000ms (2 minutes).
+ - Write a clear, concise description of what your command does. For simple commands, keep it brief (5-10 words). For complex commands, include enough context so that the user can understand what your command will do.
+ - When issuing multiple commands:
+  - If the commands are independent and can run in parallel, make multiple PowerShell tool calls in a single message.
+  - If the commands depend on each other and must run sequentially, use a single call with ';' or '&&' (PowerShell 7+) to chain them together.
+  - DO NOT use newlines to separate commands (newlines are ok in quoted strings).
+ - For git commands:
+  - Prefer to create a new commit rather than amending an existing commit.
+  - Before running destructive operations (e.g., git reset --hard, git push --force), consider whether there is a safer alternative that achieves the same goal. Only use destructive operations when they are truly the best approach.
+  - Never skip hooks (--no-verify) or bypass signing (--no-gpg-sign, -c commit.gpgsign=false) unless the user has explicitly asked for it. If a hook fails, investigate and fix the underlying issue.
+ - Avoid unnecessary ` + "`Start-Sleep`" + ` commands:
   - Do not sleep between commands that can run immediately — just run them.
   - Do not retry failing commands in a sleep loop — diagnose the root cause or consider an alternative approach.
   - If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.`
@@ -106,13 +155,10 @@ func (b *BashTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Determine user's shell
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
-	}
-
-	cmd := exec.CommandContext(ctx, shell, "-c", params.Command)
+	// Determine the shell to use (OS-aware).
+	si := GetShellInfo()
+	cmdArgs := append(si.Args, params.Command)
+	cmd := exec.CommandContext(ctx, si.Path, cmdArgs...)
 	cmd.Dir, _ = os.Getwd()
 
 	var stdout, stderr bytes.Buffer

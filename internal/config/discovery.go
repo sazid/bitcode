@@ -135,7 +135,9 @@ func discoverProjectFilesWalk(projectDir string) []string {
 			if err != nil {
 				return nil
 			}
-			files = append(files, rel)
+			// Normalise to forward slashes so the output is consistent
+			// across operating systems (git ls-files also uses forward slashes).
+			files = append(files, filepath.ToSlash(rel))
 		}
 		return nil
 	})

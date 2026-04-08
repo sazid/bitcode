@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -16,6 +17,8 @@ func Send(title, body string) {
 		sendDarwin(title, body)
 	case "linux":
 		sendLinux(title, body)
+	case "windows":
+		sendWindows(title, body)
 	}
 }
 
@@ -106,6 +109,35 @@ func detectTerminalBundleID() string {
 
 func sendLinux(title, body string) {
 	_ = exec.Command("notify-send", title, body).Start()
+}
+
+// sendWindows sends a Windows balloon-tip notification using PowerShell.
+// It runs PowerShell in a hidden window so no console flashes.
+func sendWindows(title, body string) {
+	script := fmt.Sprintf(
+		`[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; `+
+			`$n = New-Object System.Windows.Forms.NotifyIcon; `+
+			`$n.Icon = [System.Drawing.SystemIcons]::Information; `+
+			`$n.BalloonTipTitle = '%s'; `+
+			`$n.BalloonTipText = '%s'; `+
+			`$n.Visible = $true; `+
+			`$n.ShowBalloonTip(4000); `+
+			`Start-Sleep -Milliseconds 4500; `+
+			`$n.Dispose()`,
+		escapePowerShell(title),
+		escapePowerShell(body),
+	)
+	_ = exec.Command(
+		"powershell.exe",
+		"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+		"-Command", script,
+	).Start()
+}
+
+// escapePowerShell escapes single-quote characters for use inside a
+// PowerShell single-quoted string ('' is the escape sequence).
+func escapePowerShell(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // escapeAppleScript escapes characters that are special in AppleScript strings.

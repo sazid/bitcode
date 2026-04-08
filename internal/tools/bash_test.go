@@ -2,12 +2,29 @@ package tools
 
 import (
 	"encoding/json"
-	"runtime"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sazid/bitcode/internal"
 )
+
+// isUsingPowerShell returns true when the active shell is PowerShell (pwsh or powershell.exe).
+// It checks the actual shell resolved by GetShellInfo so that Git-Bash / Cygwin / MSYS2
+// environments on Windows (which set SHELL=/usr/bin/bash) are detected correctly.
+func isUsingPowerShell() bool {
+	si := GetShellInfo()
+	base := strings.ToLower(filepath.Base(si.Path))
+	return strings.Contains(base, "pwsh") || strings.Contains(base, "powershell")
+}
+
+// shellCmd returns bash when the active shell is bash/sh, or ps when it is PowerShell.
+func shellCmd(bash, ps string) string {
+	if isUsingPowerShell() {
+		return ps
+	}
+	return bash
+}
 
 func executeBash(t *testing.T, input BashInput) (ToolResult, error) {
 	t.Helper()
@@ -37,7 +54,12 @@ func TestBashTool_SimpleCommand(t *testing.T) {
 
 func TestBashTool_MultilineOutput(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo 'line1\nline2\nline3'",
+		// Bash: single-quoted string with literal \n does NOT produce newlines — both
+		// platforms just need to emit the three words somewhere in the output.
+		Command: shellCmd(
+			`printf '%s\n%s\n%s\n' line1 line2 line3`,
+			`Write-Output "line1"; Write-Output "line2"; Write-Output "line3"`,
+		),
 		Description: "Print multiple lines",
 	})
 	if err != nil {
@@ -50,8 +72,8 @@ func TestBashTool_MultilineOutput(t *testing.T) {
 
 func TestBashTool_ExitCodeZero(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "true",
-		Description: "Run true",
+		Command:     shellCmd("true", "exit 0"),
+		Description: "Exit with code 0",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -77,7 +99,10 @@ func TestBashTool_NonZeroExitCode(t *testing.T) {
 
 func TestBashTool_StderrOutput(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo error_msg >&2",
+		Command: shellCmd(
+			"echo error_msg >&2",
+			`[Console]::Error.WriteLine("error_msg")`,
+		),
 		Description: "Write to stderr",
 	})
 	if err != nil {
@@ -90,7 +115,10 @@ func TestBashTool_StderrOutput(t *testing.T) {
 
 func TestBashTool_CombinedStdoutStderr(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo out && echo err >&2",
+		Command: shellCmd(
+			"echo out && echo err >&2",
+			`Write-Output "out"; [Console]::Error.WriteLine("err")`,
+		),
 		Description: "Combined stdout and stderr",
 	})
 	if err != nil {
@@ -103,7 +131,10 @@ func TestBashTool_CombinedStdoutStderr(t *testing.T) {
 
 func TestBashTool_StderrPreviewPrefix(t *testing.T) {
 	raw, _ := json.Marshal(BashInput{
-		Command:     "echo out && echo err_line >&2",
+		Command: shellCmd(
+			"echo out && echo err_line >&2",
+			`Write-Output "out"; [Console]::Error.WriteLine("err_line")`,
+		),
 		Description: "Stdout and stderr preview",
 	})
 	tool := &BashTool{}
@@ -159,7 +190,7 @@ func TestBashTool_EmptyCommand(t *testing.T) {
 
 func TestBashTool_Timeout(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "sleep 10",
+		Command:     shellCmd("sleep 10", "Start-Sleep -Seconds 10"),
 		Description: "Sleep that should timeout",
 		Timeout:     500, // 500ms timeout
 	})
@@ -189,8 +220,11 @@ func TestBashTool_TimeoutClamped(t *testing.T) {
 
 func TestBashTool_PipedCommands(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo 'hello world' | tr ' ' '_'",
-		Description: "Pipe echo to tr",
+		Command: shellCmd(
+			"echo 'hello world' | tr ' ' '_'",
+			`"hello world" -replace ' ','_'`,
+		),
+		Description: "Replace space with underscore",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -202,7 +236,8 @@ func TestBashTool_PipedCommands(t *testing.T) {
 
 func TestBashTool_ChainedCommands(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo first && echo second",
+		// Semicolon chaining works on both bash and PowerShell.
+		Command:     "echo first; echo second",
 		Description: "Chained commands",
 	})
 	if err != nil {
@@ -215,14 +250,18 @@ func TestBashTool_ChainedCommands(t *testing.T) {
 
 func TestBashTool_EnvironmentVariables(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "echo $HOME",
-		Description: "Print HOME env var",
+		Command: shellCmd(
+			"echo $HOME",
+			`Write-Output $env:USERPROFILE`,
+		),
+		Description: "Print home directory env var",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.TrimSpace(result.Content) == "" || strings.TrimSpace(result.Content) == "$HOME" {
-		t.Errorf("expected HOME to be expanded, got: %q", result.Content)
+	output := strings.TrimSpace(result.Content)
+	if output == "" || output == "$HOME" || output == "$env:USERPROFILE" {
+		t.Errorf("expected home directory to be expanded, got: %q", output)
 	}
 }
 
@@ -259,8 +298,9 @@ func TestBashTool_EmitsEvent(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Name != "Bash" {
-		t.Errorf("expected event name 'Bash', got %q", events[0].Name)
+	// Tool name is "Bash" on Unix and "PowerShell" on Windows.
+	if events[0].Name != tool.Name() {
+		t.Errorf("expected event name %q, got %q", tool.Name(), events[0].Name)
 	}
 	if events[0].Message != "Exit code: 0" {
 		t.Errorf("expected 'Exit code: 0', got %q", events[0].Message)
@@ -298,7 +338,7 @@ func TestBashTool_EventShowsErrorExitCode(t *testing.T) {
 func TestBashTool_PreviewTruncation(t *testing.T) {
 	// Generate more than 5 lines of output
 	raw, _ := json.Marshal(BashInput{
-		Command:     "seq 1 10",
+		Command:     shellCmd("seq 1 10", "1..10"),
 		Description: "Generate 10 lines",
 	})
 	tool := &BashTool{}
@@ -326,20 +366,18 @@ func TestBashTool_PreviewTruncation(t *testing.T) {
 }
 
 func TestBashTool_UsesUserShell(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell test not applicable on Windows")
-	}
-	// The command should execute using whatever shell is set
+	// Print something that identifies the shell.
+	cmd := shellCmd("echo $0", `$PSVersionTable.PSEdition`)
 	result, err := executeBash(t, BashInput{
-		Command:     "echo $0",
-		Description: "Print shell name",
+		Command:     cmd,
+		Description: "Print shell identifier",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	output := strings.TrimSpace(result.Content)
 	if output == "" {
-		t.Error("expected shell name in output")
+		t.Error("expected shell identifier in output")
 	}
 }
 
@@ -358,7 +396,10 @@ func TestBashTool_InvalidJSON(t *testing.T) {
 
 func TestBashTool_FailedCommand(t *testing.T) {
 	result, err := executeBash(t, BashInput{
-		Command:     "ls /nonexistent_directory_12345",
+		Command: shellCmd(
+			"ls /nonexistent_directory_12345",
+			"Get-ChildItem C:\\nonexistent_directory_12345_xyzzy",
+		),
 		Description: "List nonexistent directory",
 	})
 	if err != nil {

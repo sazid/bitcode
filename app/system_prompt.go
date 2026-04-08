@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sazid/bitcode/internal/skills"
+	"github.com/sazid/bitcode/internal/tools"
 )
 
 // formatInstructionFilePaths returns a system prompt section listing
@@ -29,10 +30,9 @@ func formatInstructionFilePaths(files []string) string {
 
 func buildSystemPrompt(skillManager skills.SkillProvider, instructionFiles []string) string {
 	wd, _ := os.Getwd()
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
-	}
+
+	si := tools.GetShellInfo()
+	shell := si.Name
 
 	isGitRepo := false
 	if _, err := os.Stat(filepath.Join(wd, ".git")); err == nil {
@@ -74,7 +74,24 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
   - Don't add error handling, fallbacks, or validation for scenarios that can't happen.
   - Don't create helpers, utilities, or abstractions for one-time operations.
 
-# Using your tools
+`)
+
+	// Platform-specific shell tool instructions
+	if runtime.GOOS == "windows" {
+		sb.WriteString(`# Using your tools
+ - Do NOT use PowerShell to run commands when a relevant dedicated tool is provided:
+  - To read files use Read instead of Get-Content, cat, head, or tail
+  - To edit files use Edit instead of (Get-Content ... | Set-Content)
+  - To create files use Write instead of Out-File or Set-Content
+  - To search for files use Glob instead of Get-ChildItem, ls, or dir
+  - Reserve using PowerShell exclusively for system commands and terminal operations that require shell execution.
+ - ALWAYS measure files before reading to avoid wasting context:
+  - Before reading a file, use FileSize and/or LineCount to check the file size
+  - If a file is large (>500 lines or >50KB), consider using offset/limit parameters or searching for specific text patterns instead of reading the entire file
+  - Large files consume significant context window space - be judicious about when to read whole files
+`)
+	} else {
+		sb.WriteString(`# Using your tools
  - Do NOT use the Bash to run commands when a relevant dedicated tool is provided:
   - To read files use Read instead of cat, head, tail, or sed
   - To edit files use Edit instead of sed or awk
@@ -85,7 +102,10 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
   - Before reading a file, use FileSize and/or LineCount to check the file size
   - If a file is large (>500 lines or >50KB), consider using offset/limit parameters or searching for specific text patterns instead of reading the entire file
   - Large files consume significant context window space - be judicious about when to read whole files
+`)
+	}
 
+	sb.WriteString(`
 # Communication style
  - When starting work on a user request, ALWAYS begin by briefly restating what you understand the user wants in your own words (1-2 sentences). This lets the user confirm you're on the right track before you dive in.
  - As you work, output brief progress updates (1 line each) so the user can follow along. For example: "Reading the config file to understand the current setup.", "Found the issue — the handler isn't checking for nil.", "Updating the test to cover the new edge case." These should be natural and conversational, not verbose.
@@ -107,16 +127,36 @@ Only create commits when requested by the user. When the user asks you to create
   - Summarize the nature of the changes.
   - Do not commit files that likely contain secrets (.env, credentials.json, etc).
   - Draft a concise (1-2 sentences) commit message that focuses on the "why" rather than the "what".
-3. Create the commit. ALWAYS pass the commit message via a HEREDOC:
+`)
+
+	// Platform-specific git commit instructions
+	if runtime.GOOS == "windows" {
+		sb.WriteString(`3. Create the commit. On Windows PowerShell, pass the commit message using a here-string:
+   $msg = @"
+   Commit message here.
+
+   Co-Authored-By: BitCode <https://github.com/sazid/bitcode>
+"@
+   git commit -m $msg
+
+   Note: The closing "@" MUST be at the start of the line (no leading spaces).
+   Alternatively, use backtick-n for newlines on a single line:
+   git commit -m "Commit message here.` + "`n`n" + `Co-Authored-By: BitCode <https://github.com/sazid/bitcode>"
+`)
+	} else {
+		sb.WriteString(`3. Create the commit. ALWAYS pass the commit message via a HEREDOC:
    git commit -m "$(cat <<'EOF'
    Commit message here.
 
    Co-Authored-By: BitCode <https://github.com/sazid/bitcode>
    EOF
    )"
+`)
+	}
 
+	sb.WriteString(`
 # Creating pull requests
-Use the gh command via the Bash tool for ALL GitHub-related tasks including working with issues, pull requests, checks, and releases.
+Use the gh command via the shell tool for ALL GitHub-related tasks including working with issues, pull requests, checks, and releases.
 
 IMPORTANT: When the user asks you to create a pull request:
 1. Run git status, git diff, and git log to understand the current state.
@@ -128,7 +168,7 @@ IMPORTANT: When the user asks you to create a pull request:
 Carefully consider the reversibility and blast radius of actions. For actions that are hard to reverse, affect shared systems, or could be risky, check with the user before proceeding.
 
 Examples of risky actions that warrant user confirmation:
-- Destructive operations: deleting files/branches, dropping database tables, rm -rf
+- Destructive operations: deleting files/branches, dropping database tables
 - Hard-to-reverse operations: force-pushing, git reset --hard, amending published commits
 - Actions visible to others: pushing code, creating/closing PRs or issues, sending messages
 

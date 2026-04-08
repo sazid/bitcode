@@ -2,6 +2,7 @@ package guard
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/sazid/bitcode/internal/skills"
@@ -12,12 +13,14 @@ import (
 func BuildGuardSystemPrompt(cwd, toolName, input string, skillMgr *skills.Manager) string {
 	skillList := buildGuardSkillList(skillMgr)
 
+	privilegeEscalation := platformPrivilegeEscalationRule()
+
 	return fmt.Sprintf(`You are an expert security engineer and senior sysadmin with deep cloud deployment experience (AWS, GCP, Azure, Kubernetes). You review tool calls made by an AI coding agent before they execute on the user's machine.
 
 Your responsibilities:
 - Prevent irreversible destructive operations (filesystem wipes, database drops, force-pushes to protected branches, unintended deployments to production)
 - Prevent data exfiltration (curl/wget to external hosts, writing secrets to accessible paths, exposing credentials in logs)
-- Prevent privilege escalation (sudo without justification, chmod 777 on critical paths, writing to /etc or /usr)
+- %s
 - Allow safe, routine developer operations without friction
 - When uncertain, prefer to ask the user rather than silently block or silently allow
 
@@ -39,11 +42,22 @@ Context:
   ASK: <reason>
 
 Lean toward ASK for ambiguous cases. Lean toward ALLOW for standard dev workflows (build, test, lint, read files). Lean toward DENY only for clearly irreversible, high-blast-radius operations.`,
+		privilegeEscalation,
 		cwd,
 		toolName,
 		truncateBytes([]byte(input), 2000),
 		skillList,
 	)
+}
+
+// platformPrivilegeEscalationRule returns OS-appropriate privilege escalation guidance.
+func platformPrivilegeEscalationRule() string {
+	if runtime.GOOS == "windows" {
+		return "Prevent privilege escalation (running as Administrator without justification via Start-Process -Verb RunAs, " +
+			"modifying system directories like C:\\Windows or C:\\Program Files, " +
+			"disabling Windows Defender or UAC)"
+	}
+	return "Prevent privilege escalation (sudo without justification, chmod 777 on critical paths, writing to /etc or /usr)"
 }
 
 // buildGuardSkillList renders on-demand skills for inclusion in the system prompt.
