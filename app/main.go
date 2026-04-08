@@ -30,10 +30,12 @@ func main() {
 	var prompt string
 	var reasoningEffort string
 	var showVersion bool
+	var quiet bool
 	var maxTurns int
 	flag.StringVar(&prompt, "p", "", "Prompt to send to LLM (omit for interactive mode)")
 	flag.StringVar(&reasoningEffort, "reasoning", "", "Reasoning effort: low, medium, high (omit to let the model decide)")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
+	flag.BoolVar(&quiet, "q", false, "Quiet mode: suppress tool usage and spinner output (single-shot only)")
 	flag.IntVar(&maxTurns, "max-turns", defaultMaxAgentTurns, "Maximum number of agent turns per conversation")
 	var continueID string
 	flag.StringVar(&continueID, "c", "", "Resume a conversation by ID")
@@ -153,14 +155,22 @@ func main() {
 		go func() { <-sigCh; cancel() }()
 
 		agentConfig.TaskTitle = prompt
-		runAgentLoop(ctx, agentConfig, &messages, toolDefs, singleShotCallbacks(themes, agentConfig.TodoStore))
+		result := runAgentLoop(ctx, agentConfig, &messages, toolDefs, singleShotCallbacks(themes, agentConfig.TodoStore, quiet))
+
+		if result != nil && result.Output != "" {
+			if quiet {
+				fmt.Fprint(os.Stdout, result.Output)
+			} else {
+				renderMarkdown(os.Stdout, themes.Active(), result.Output)
+			}
+		}
 
 		title := "BitCode: " + notify.Truncate(agentConfig.TaskTitle, 40)
 		notify.Send(title, "Finished working")
 		observer.Close()
 	} else if prompt != "" {
 		observer.RecordSessionStart("single-shot")
-		runSingleShot(agentConfig, themes, prompt)
+		runSingleShot(agentConfig, themes, prompt, quiet)
 		observer.Close()
 	} else {
 		observer.RecordSessionStart("interactive")
@@ -188,13 +198,18 @@ func toolDefsFromManager(m tools.ToolRegistry) []llm.ToolDef {
 	return defs
 }
 
-func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore) AgentCallbacks {
+func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore, quiet bool) AgentCallbacks {
 	var spin *Spinner
 	return AgentCallbacks{
 		OnContent: func(content string) {
-			renderMarkdown(os.Stderr, themes.Active(), content)
+			if !quiet {
+				renderMarkdown(os.Stderr, themes.Active(), content)
+			}
 		},
 		OnThinking: func(active bool) {
+			if quiet {
+				return
+			}
 			if active {
 				var todos []tools.TodoItem
 				if todoStore != nil {
@@ -207,6 +222,9 @@ func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore) Agent
 			}
 		},
 		OnEvent: func(e internal.Event) {
+			if quiet {
+				return
+			}
 			renderEvent(os.Stderr, themes.Active(), e)
 		},
 		OnError: func(err error) {
@@ -217,7 +235,7 @@ func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore) Agent
 }
 
 // runSingleShot runs a single prompt through the agent loop and exits.
-func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
+func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string, quiet bool) {
 	config.TaskTitle = prompt
 
 	messages, toolDefs := newConversation(config)
@@ -233,7 +251,17 @@ func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string) {
 		cancel()
 	}()
 
-	runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(themes, config.TodoStore))
+	result := runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(themes, config.TodoStore, quiet))
+
+	// Write the final assistant output to stdout after all stderr activity is done.
+	// This keeps it cleanly separated from tool events/spinners on stderr.
+	if result != nil && result.Output != "" {
+		if quiet {
+			fmt.Fprint(os.Stdout, result.Output)
+		} else {
+			renderMarkdown(os.Stdout, themes.Active(), result.Output)
+		}
+	}
 
 	title := "BitCode: " + notify.Truncate(config.TaskTitle, 40)
 	notify.Send(title, "Finished working")

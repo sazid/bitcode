@@ -17,7 +17,7 @@ type AgentCallbacks = agent.Callbacks
 
 // runAgentLoop is a thin wrapper around agent.Runner.Run for backward compatibility.
 // It will be removed once all callers use Runner directly.
-func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message, toolDefs []llm.ToolDef, cb AgentCallbacks) {
+func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message, toolDefs []llm.ToolDef, cb AgentCallbacks) *agent.Result {
 	_ = toolDefs // toolDefs are now derived inside the runner
 
 	runner := agent.NewRunner(cfg, cb)
@@ -25,4 +25,5 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 	if result != nil {
 		*messages = result.Messages
 	}
+	return result
 }
