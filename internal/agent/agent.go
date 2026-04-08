@@ -12,6 +12,7 @@ import (
 )
 
 const DefaultMaxTurns = 200
+const DefaultMaxRetries = 5
 
 type Result struct {
 	Output   string        // final assistant text (last message)
@@ -30,6 +31,7 @@ type Config struct {
 	Model          string
 	Reasoning      string
 	MaxTurns       int
+	MaxRetries     int
 
 	// Capabilities
 	Tools     tools.ToolRegistry

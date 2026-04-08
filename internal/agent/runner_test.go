@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -203,5 +204,84 @@ func TestRunnerContextCancellation(t *testing.T) {
 	}
 	if provider.callIdx != 0 {
 		t.Errorf("expected 0 provider calls on cancelled context, got %d", provider.callIdx)
+	}
+}
+
+// flakyProvider fails the first N calls, then succeeds.
+type flakyProvider struct {
+	failCount  int // how many times to fail before succeeding
+	callCount  int
+	mu         sync.Mutex
+	successMsg string
+}
+
+func (f *flakyProvider) Complete(_ context.Context, _ llm.CompletionParams, _ func(llm.StreamDelta)) (*llm.CompletionResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callCount++
+	if f.callCount <= f.failCount {
+		return nil, fmt.Errorf("API error on call %d", f.callCount)
+	}
+	return &llm.CompletionResponse{
+		Message:      llm.TextMessage(llm.RoleAssistant, f.successMsg),
+		FinishReason: llm.FinishStop,
+	}, nil
+}
+
+func TestRunnerRetryOnError(t *testing.T) {
+	provider := &flakyProvider{failCount: 2, successMsg: "recovered"}
+
+	var errors []string
+	cfg := &Config{
+		Provider:   provider,
+		Tools:      tools.NewManager(),
+		MaxTurns:   10,
+		MaxRetries: 5,
+	}
+	cb := Callbacks{
+		OnError: func(err error) { errors = append(errors, err.Error()) },
+	}
+
+	runner := NewRunner(cfg, cb)
+	result, err := runner.Run(context.Background(), []llm.Message{
+		llm.TextMessage(llm.RoleUser, "hi"),
+	})
+
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+	if result.Output != "recovered" {
+		t.Errorf("expected output 'recovered', got %q", result.Output)
+	}
+	if provider.callCount != 3 {
+		t.Errorf("expected 3 provider calls (2 failures + 1 success), got %d", provider.callCount)
+	}
+	// 2 error messages + 2 retry messages = 4
+	if len(errors) != 4 {
+		t.Errorf("expected 4 error callbacks (2 errors + 2 retry notices), got %d: %v", len(errors), errors)
+	}
+}
+
+func TestRunnerRetryExhausted(t *testing.T) {
+	provider := &flakyProvider{failCount: 10, successMsg: "should not reach"}
+
+	cfg := &Config{
+		Provider:   provider,
+		Tools:      tools.NewManager(),
+		MaxTurns:   10,
+		MaxRetries: 2,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	_, err := runner.Run(context.Background(), []llm.Message{
+		llm.TextMessage(llm.RoleUser, "hi"),
+	})
+
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	// 1 initial + 2 retries = 3 calls
+	if provider.callCount != 3 {
+		t.Errorf("expected 3 provider calls (1 + 2 retries), got %d", provider.callCount)
 	}
 }

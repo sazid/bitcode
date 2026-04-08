@@ -145,27 +145,73 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 		var resp *llm.CompletionResponse
 		var err error
 
-		// Use StatefulProvider if available (threads response IDs for Responses API)
-		if sp, ok := cfg.Provider.(llm.StatefulProvider); ok {
-			msgCount := len(messagesForAPI)
-			if msgCount > 0 && messagesForAPI[0].Role == llm.RoleSystem {
-				msgCount--
+		maxRetries := cfg.MaxRetries
+		if maxRetries <= 0 {
+			maxRetries = DefaultMaxRetries
+		}
+
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			if attempt > 0 {
+				if cb.OnError != nil {
+					cb.OnError(fmt.Errorf("retrying (%d/%d)...", attempt, maxRetries))
+				}
+				backoff := time.Duration(1<<(attempt-1)) * time.Second
+				if backoff > 16*time.Second {
+					backoff = 16 * time.Second
+				}
+				select {
+				case <-time.After(backoff):
+				case <-ctx.Done():
+					if cb.OnThinking != nil {
+						cb.OnThinking(false)
+					}
+					return r.buildResult(messages, totalUsage), ctx.Err()
+				}
 			}
 
-			statefulResp, statefulErr := sp.CompleteStateful(ctx, llm.StatefulCompletionParams{
-				CompletionParams:     params,
-				PreviousResponseID:   responseID,
-				PreviousMessageCount: prevMessageCount,
-			}, onDelta)
-			if statefulErr != nil {
-				err = statefulErr
+			resp = nil
+			err = nil
+
+			// Use StatefulProvider if available (threads response IDs for Responses API)
+			if sp, ok := cfg.Provider.(llm.StatefulProvider); ok {
+				msgCount := len(messagesForAPI)
+				if msgCount > 0 && messagesForAPI[0].Role == llm.RoleSystem {
+					msgCount--
+				}
+
+				statefulResp, statefulErr := sp.CompleteStateful(ctx, llm.StatefulCompletionParams{
+					CompletionParams:     params,
+					PreviousResponseID:   responseID,
+					PreviousMessageCount: prevMessageCount,
+				}, onDelta)
+				if statefulErr != nil {
+					err = statefulErr
+				} else {
+					resp = &statefulResp.CompletionResponse
+					responseID = statefulResp.ResponseID
+					prevMessageCount = msgCount
+				}
 			} else {
-				resp = &statefulResp.CompletionResponse
-				responseID = statefulResp.ResponseID
-				prevMessageCount = msgCount
+				resp, err = cfg.Provider.Complete(ctx, params, onDelta)
 			}
-		} else {
-			resp, err = cfg.Provider.Complete(ctx, params, onDelta)
+
+			if err == nil {
+				break
+			}
+
+			if ctx.Err() != nil {
+				if cb.OnThinking != nil {
+					cb.OnThinking(false)
+				}
+				return r.buildResult(messages, totalUsage), ctx.Err()
+			}
+
+			if cfg.Observer != nil {
+				cfg.Observer.RecordError(turn, "llm", err.Error(), "agent_loop")
+			}
+			if cb.OnError != nil {
+				cb.OnError(err)
+			}
 		}
 
 		if cb.OnThinking != nil {
@@ -173,15 +219,6 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 		}
 
 		if err != nil {
-			if ctx.Err() != nil {
-				return r.buildResult(messages, totalUsage), ctx.Err()
-			}
-			if cfg.Observer != nil {
-				cfg.Observer.RecordError(turn, "llm", err.Error(), "agent_loop")
-			}
-			if cb.OnError != nil {
-				cb.OnError(err)
-			}
 			return r.buildResult(messages, totalUsage), err
 		}
 
