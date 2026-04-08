@@ -2,7 +2,6 @@ package conversation
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -289,25 +288,12 @@ func TestDefaultDir(t *testing.T) {
 	if !filepath.IsAbs(dir) {
 		t.Error("expected absolute path")
 	}
-	if !contains(dir, ".bitcode") {
+	if !strings.Contains(dir, ".bitcode") {
 		t.Error("expected path to contain .bitcode")
 	}
-	if !contains(dir, "conversations") {
+	if !strings.Contains(dir, "conversations") {
 		t.Error("expected path to contain conversations")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestLoadConversationWithLargeMessages(t *testing.T) {
@@ -438,8 +424,4 @@ func TestListWithLimit(t *testing.T) {
 	if len(all) != 10 {
 		t.Errorf("expected 10 conversations, got %d", len(all))
 	}
-}
-
-func TestMain(m *testing.M) {
-	os.Exit(m.Run())
 }
