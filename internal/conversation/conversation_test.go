@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,6 +324,31 @@ func TestLoadConversationWithLargeMessages(t *testing.T) {
 	}
 	if !strings.Contains(loaded.Messages[0].Text(), "line\n") {
 		t.Error("message content corrupted")
+	}
+}
+
+func TestMessageCountComputedOnLoad(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	conv, _ := mgr.Create("Count Test")
+
+	for i := 0; i < 5; i++ {
+		mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleUser, fmt.Sprintf("msg %d", i)))
+	}
+
+	loaded, err := mgr.Load(conv.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.MessageCount != 5 {
+		t.Errorf("expected MessageCount 5, got %d", loaded.MessageCount)
+	}
+	if len(loaded.Messages) != 5 {
+		t.Errorf("expected 5 messages, got %d", len(loaded.Messages))
 	}
 }
 

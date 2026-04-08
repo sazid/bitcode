@@ -125,21 +125,12 @@ func (m *Manager) AppendMessage(id string, msg llm.Message) error {
 	}
 	defer file.Close()
 
-	// Write message as JSON line
 	enc := json.NewEncoder(file)
 	if err := enc.Encode(msg); err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}
 
-	// Update metadata (read current, increment count, write back)
-	meta, err := m.loadMetadataFromPathLocked(path)
-	if err != nil {
-		return err
-	}
-	meta.MessageCount++
-	meta.UpdatedAt = time.Now()
-
-	return m.updateMetadataLocked(path, meta)
+	return nil
 }
 
 // List returns metadata for all conversations, sorted by updated_at desc.
@@ -254,16 +245,14 @@ func (m *Manager) Rename(id string, newTitle string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	path := filepath.Join(m.dir, id+".jsonl")
-	meta, err := m.loadMetadataFromPathLocked(path)
+	conv, err := m.loadByIDLocked(id)
 	if err != nil {
 		return err
 	}
 
-	meta.Title = truncateTitle(newTitle)
-	meta.UpdatedAt = time.Now()
-
-	return m.updateMetadataLocked(path, meta)
+	conv.Title = truncateTitle(newTitle)
+	conv.UpdatedAt = time.Now()
+	return m.saveLocked(conv)
 }
 
 // Delete removes a conversation.
@@ -340,49 +329,36 @@ func (m *Manager) loadFromFileLocked(file *os.File) (*Conversation, error) {
 }
 
 func (m *Manager) loadMetadataLocked(file *os.File) (*Metadata, error) {
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("empty conversation file")
+	}
+
 	var meta Metadata
-	dec := json.NewDecoder(file)
-	if err := dec.Decode(&meta); err != nil {
+	if err := json.Unmarshal(scanner.Bytes(), &meta); err != nil {
 		return nil, fmt.Errorf("decode metadata: %w", err)
 	}
+
+	// Count remaining lines as messages
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+	meta.MessageCount = count
+
 	return &meta, nil
 }
 
-func (m *Manager) loadMetadataFromPathLocked(path string) (*Metadata, error) {
+func (m *Manager) loadByIDLocked(id string) (*Conversation, error) {
+	path := filepath.Join(m.dir, id+".jsonl")
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open conversation: %w", err)
 	}
 	defer file.Close()
-	return m.loadMetadataLocked(file)
-}
-
-func (m *Manager) updateMetadataLocked(path string, meta *Metadata) error {
-	// Read existing file
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open conversation: %w", err)
-	}
-
-	// Skip first line (old metadata)
-	buf := make([]byte, 1)
-	for {
-		_, err := file.Read(buf)
-		if err != nil || buf[0] == '\n' {
-			break
-		}
-	}
-
-	// Read remaining content (messages)
-	messages, _ := llm.LoadConversation(file)
-	file.Close()
-
-	// Rewrite with new metadata
-	conv := &Conversation{
-		Metadata: *meta,
-		Messages: messages,
-	}
-	return m.saveLocked(conv)
+	return m.loadFromFileLocked(file)
 }
 
 // searchMessages searches messages for query and returns matching indices.
