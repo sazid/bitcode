@@ -21,22 +21,21 @@ curl -fsSL https://raw.githubusercontent.com/sazid/bitcode/main/install.sh | sh
 
 <a href="https://asciinema.org/a/850426" target="_blank"><img src="https://asciinema.org/a/850426.svg" /></a>
 
-An agentic AI coding assistant in your terminal — with interactive TUI, smart security guards, extensible skills, built-in todo tracking with planning, and full control over reasoning effort.
+Code with agents. Built-in security guards, resumable sessions, and subagents for complex tasks — all in your terminal.
 
 ## Features
 
-- **Interactive Mode** — Full TUI with multiline input editor, bordered prompt, and keyboard shortcuts
-- **Single-Shot Mode** — Run a single prompt from the command line with `-p`
-- **Agent Loop** — Iterative LLM conversation with automatic tool calling (up to 50 turns)
-- **Tool Guards** — Safety layer that validates tool calls before execution (rules-based, user prompts, or LLM-powered)
-- **Guard Agent** — Expert multi-turn LLM agent for security-aware tool validation with language-specific skills
-- **System Reminders** — Dynamic context injection via `<system-reminder>` tags with [plugin support](docs/system-reminders.md)
-- **Skills** — User-defined prompt templates loaded from `.agents/`, `.claude/`, or `.bitcode/` directories
-- **Markdown Rendering** — Rich terminal output with syntax-highlighted code blocks
-- **Reasoning Control** — Adjustable reasoning effort (`--reasoning` flag)
-- **Multi-Provider Support** — Anthropic, OpenAI (Chat Completions + Responses API), OpenRouter, and any OpenAI-compatible API
-- **Multi-Modal** — Images, audio, and document content in conversations
-- **WebSocket Streaming** — Optional WebSocket transport for faster tool-heavy workflows (OpenAI Responses API)
+- **Agentic Coding** — Interactive TUI or single-shot mode (`-p`) with iterative tool calling
+- **Subagents** — Spawn specialized agents for complex tasks (explore, plan, general-purpose)
+- **Resume Sessions** — Continue any conversation with `-c` (single-shot) or scoped to your working directory
+- **Security Guards** — Multi-layer validation: rules, user prompts, and LLM-powered guard agent
+- **Language-Aware Guards** — Bash, Python, Go, JavaScript, and PowerShell security skills
+- **Skills** — User-defined prompt templates from `.agents/`, `.claude/`, or `.bitcode/`
+- **System Reminders** — Dynamic context injection via `<system-reminder>` with [plugin support](docs/system-reminders.md)
+- **Reasoning Control** — Adjust effort with `--reasoning` flag
+- **Multi-Provider** — Anthropic, OpenAI, OpenRouter, or any OpenAI-compatible API
+- **Multi-Modal** — Images, audio, documents
+- **WebSocket Streaming** — Faster tool-heavy workflows (OpenAI Responses API)
 
 ### Tools
 
