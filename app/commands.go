@@ -288,17 +288,43 @@ func (d *CommandDispatcher) handleResume(args string, agentRunning bool, resetCo
 	d.config.TodoStore.Clear()
 	newMessages, _ := resetConversation()
 
-	// Set the conversation ID and messages (merge system prompt with loaded messages)
 	d.config.ConvID = conv.ID
 
 	d.p.Send(newConversationMsg{taskID: conv.ID})
-	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Resumed conversation: %s (%d messages)", conv.Title, len(conv.Messages)))))
+	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  Resumed conversation: %s (%d messages)", conv.Title, len(conv.Messages)))))
 
-	// Return the loaded messages to be used by the orchestrator
-	// Keep the system prompt from newMessages[0] and append loaded messages
+	// Show last few messages as context
+	if len(conv.Messages) > 0 {
+		showCount := 3
+		if showCount > len(conv.Messages) {
+			showCount = len(conv.Messages)
+		}
+		var preview strings.Builder
+		preview.WriteString(dimStyle().Render("\n  Last messages:\n"))
+		start := len(conv.Messages) - showCount
+		for i := start; i < len(conv.Messages); i++ {
+			msg := conv.Messages[i]
+			role := string(msg.Role)
+			text := msg.Text()
+			if len(text) > 120 {
+				text = text[:117] + "..."
+			}
+			text = strings.ReplaceAll(text, "\n", " ")
+			preview.WriteString(dimStyle().Render(fmt.Sprintf("    [%s] %s\n", role, text)))
+		}
+		d.p.Send(appendOutputMsg(preview.String()))
+	}
+
+	// Build resumed messages: system prompt (if available) + loaded messages
+	var resumed []llm.Message
+	if len(newMessages) > 0 {
+		resumed = append(resumed, newMessages[0])
+	}
+	resumed = append(resumed, conv.Messages...)
+
 	return DispatchResult{
 		Handled:  true,
-		Messages: append([]llm.Message{newMessages[0]}, conv.Messages...),
+		Messages: resumed,
 	}
 }
 
