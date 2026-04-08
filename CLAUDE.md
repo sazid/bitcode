@@ -14,6 +14,7 @@ go vet ./...                      # Lint
 
 Run interactively: `./bitcode`
 Single-shot: `./bitcode -p "prompt"`
+Resume conversation: `./bitcode -c <conversation-id> -p "continue prompt"`
 With reasoning: `./bitcode --reasoning high -p "prompt"`
 
 ## Environment
@@ -34,6 +35,9 @@ Configured via `.env` file or environment variables:
 - `BITCODE_GUARD_BASE_URL` — separate base URL for guard (default: same as main)
 - `BITCODE_GUARD_PROVIDER` — separate backend for guard (default: same as main)
 - `BITCODE_GUARD_MAX_TURNS` — max turns for guard agent (default: unlimited)
+
+**Conversations:**
+- `BITCODE_CONVERSATIONS` — `false` to disable conversation persistence (default: enabled)
 
 ## Architecture
 
