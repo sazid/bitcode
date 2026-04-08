@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sazid/bitcode/internal/agent"
 	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
@@ -28,7 +29,7 @@ func formatInstructionFilePaths(files []string) string {
 	return sb.String()
 }
 
-func buildSystemPrompt(skillManager skills.SkillProvider, instructionFiles []string) string {
+func buildSystemPrompt(skillManager skills.SkillProvider, instructionFiles []string, agentRegistry *agent.Registry) string {
 	wd, _ := os.Getwd()
 
 	si := tools.GetShellInfo()
@@ -219,5 +220,31 @@ Do NOT use TodoWrite for single trivial tasks.
 		}
 	}
 
+	// Add agent descriptions if registry provided
+	if agentRegistry != nil {
+		sb.WriteString(buildAgentSection(agentRegistry))
+	}
+
+	return sb.String()
+}
+
+// buildAgentSection returns a system prompt section listing available agent types.
+func buildAgentSection(registry *agent.Registry) string {
+	agents := registry.List()
+	if len(agents) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n# Available Agents\n")
+	sb.WriteString("You can delegate tasks to specialized subagents using the Agent tool.\n")
+	sb.WriteString("Each agent has its own context, tools, and optionally a different model.\n\n")
+	for _, a := range agents {
+		fmt.Fprintf(&sb, " - %s", a.Name)
+		if a.Description != "" {
+			fmt.Fprintf(&sb, ": %s", a.Description)
+		}
+		sb.WriteString("\n")
+	}
 	return sb.String()
 }

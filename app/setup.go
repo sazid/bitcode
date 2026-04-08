@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sazid/bitcode/internal/agent"
 	"github.com/sazid/bitcode/internal/config"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
@@ -167,6 +168,18 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// buildAgentRegistry creates the agent registry with built-in and user-defined agent definitions.
+func buildAgentRegistry() *agent.Registry {
+	registry := agent.NewRegistry()
+	for _, def := range agent.BuiltinDefinitions() {
+		registry.Register(def)
+	}
+	for _, def := range agent.LoadDefinitions() {
+		registry.Register(def)
+	}
+	return registry
 }
 
 // buildInstructionFilesReminderContent creates reminder content listing discovered instruction files.

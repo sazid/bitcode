@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/agent"
 	"github.com/sazid/bitcode/internal/conversation"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
@@ -98,15 +99,20 @@ func main() {
 	wrappedTools := telemetry.WrapToolRegistry(toolManager, observer, turnCounter)
 	wrappedGuard := telemetry.WrapGuardEvaluator(guardMgr, observer, turnCounter)
 
+	// Build agent registry and wire the Agent tool
+	agentRegistry := buildAgentRegistry()
+
 	agentConfig := &AgentConfig{
 		Provider:         wrappedProvider,
+		ProviderConfig:   providerCfg,
 		Model:            model,
 		Reasoning:        reasoningEffort,
 		MaxTurns:         maxTurns,
-		ToolManager:      wrappedTools,
+		Tools:            wrappedTools,
 		SkillManager:     skillManager,
-		ReminderMgr:      reminderMgr,
-		GuardMgr:         wrappedGuard,
+		AgentRegistry:    agentRegistry,
+		Reminders:        reminderMgr,
+		Guard:            wrappedGuard,
 		TodoStore:        todoStore,
 		CompactState:     compactState,
 		InstructionFiles: instructionFiles,
@@ -114,6 +120,15 @@ func main() {
 		TurnCounter:      turnCounter,
 		ConvManager:      convManager,
 	}
+
+	// Register AgentTool after config is built (wrappedTools delegates to toolManager,
+	// so this registration is visible through the wrapper).
+	agentTool := &agent.AgentTool{
+		Registry:     agentRegistry,
+		ParentConfig: agentConfig,
+	}
+	agentConfig.AgentTool = agentTool
+	toolManager.Register(agentTool)
 
 	if continueID != "" && convManager != nil && prompt != "" {
 		conv, err := convManager.Load(continueID)
@@ -156,9 +171,9 @@ func main() {
 
 func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
 	messages := []llm.Message{
-		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager, config.InstructionFiles)),
+		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager, config.InstructionFiles, config.AgentRegistry)),
 	}
-	return messages, toolDefsFromManager(config.ToolManager)
+	return messages, toolDefsFromManager(config.Tools)
 }
 
 func toolDefsFromManager(m tools.ToolRegistry) []llm.ToolDef {
