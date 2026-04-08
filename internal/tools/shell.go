@@ -14,26 +14,26 @@ import (
 	"github.com/sazid/bitcode/internal"
 )
 
-type BashInput struct {
+type ShellInput struct {
 	Command     string `json:"command"`
 	Description string `json:"description"`
 	Timeout     int64  `json:"timeout,omitempty"`
 }
 
-type BashTool struct{}
+type ShellTool struct{}
 
-var _ Tool = (*BashTool)(nil)
+var _ Tool = (*ShellTool)(nil)
 
 // Name returns the tool name exposed to the LLM.
 // On Windows it is "PowerShell"; on Unix it is "Bash".
-func (b *BashTool) Name() string {
+func (b *ShellTool) Name() string {
 	if runtime.GOOS == "windows" {
 		return "PowerShell"
 	}
 	return "Bash"
 }
 
-func (b *BashTool) Description() string {
+func (b *ShellTool) Description() string {
 	if runtime.GOOS == "windows" {
 		return powershellToolDescription()
 	}
@@ -99,7 +99,7 @@ While the PowerShell tool can do similar things, it's better to use the built-in
  - Write a clear, concise description of what your command does. For simple commands, keep it brief (5-10 words). For complex commands, include enough context so that the user can understand what your command will do.
  - When issuing multiple commands:
   - If the commands are independent and can run in parallel, make multiple PowerShell tool calls in a single message.
-  - If the commands depend on each other and must run sequentially, use a single call with ';' or '&&' (PowerShell 7+) to chain them together.
+  - If the commands depend on each other and must run sequentially, use a single call with ';' to chain them together. Note: '&&' is only supported in PowerShell 7+; use ';' for compatibility with Windows PowerShell 5.1.
   - DO NOT use newlines to separate commands (newlines are ok in quoted strings).
  - For git commands:
   - Prefer to create a new commit rather than amending an existing commit.
@@ -111,7 +111,7 @@ While the PowerShell tool can do similar things, it's better to use the built-in
   - If you must sleep, keep the duration short (1-5 seconds) to avoid blocking the user.`
 }
 
-func (b *BashTool) ParametersSchema() map[string]any {
+func (b *ShellTool) ParametersSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -132,8 +132,8 @@ func (b *BashTool) ParametersSchema() map[string]any {
 	}
 }
 
-func (b *BashTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event) (ToolResult, error) {
-	var params BashInput
+func (b *ShellTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event) (ToolResult, error) {
+	var params ShellInput
 	if err := json.Unmarshal(input, &params); err != nil {
 		return ToolResult{}, fmt.Errorf("invalid input: %w", err)
 	}

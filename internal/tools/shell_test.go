@@ -26,21 +26,21 @@ func shellCmd(bash, ps string) string {
 	return bash
 }
 
-func executeBash(t *testing.T, input BashInput) (ToolResult, error) {
+func executeShell(t *testing.T, input ShellInput) (ToolResult, error) {
 	t.Helper()
 	raw, err := json.Marshal(input)
 	if err != nil {
 		t.Fatalf("failed to marshal input: %v", err)
 	}
-	tool := &BashTool{}
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	result, err := tool.Execute(raw, ch)
 	close(ch)
 	return result, err
 }
 
-func TestBashTool_SimpleCommand(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_SimpleCommand(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command:     "echo hello",
 		Description: "Print hello",
 	})
@@ -52,8 +52,8 @@ func TestBashTool_SimpleCommand(t *testing.T) {
 	}
 }
 
-func TestBashTool_MultilineOutput(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_MultilineOutput(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		// Bash: single-quoted string with literal \n does NOT produce newlines — both
 		// platforms just need to emit the three words somewhere in the output.
 		Command: shellCmd(
@@ -70,8 +70,8 @@ func TestBashTool_MultilineOutput(t *testing.T) {
 	}
 }
 
-func TestBashTool_ExitCodeZero(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_ExitCodeZero(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command:     shellCmd("true", "exit 0"),
 		Description: "Exit with code 0",
 	})
@@ -84,8 +84,8 @@ func TestBashTool_ExitCodeZero(t *testing.T) {
 	}
 }
 
-func TestBashTool_NonZeroExitCode(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_NonZeroExitCode(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command:     "exit 42",
 		Description: "Exit with code 42",
 	})
@@ -97,8 +97,8 @@ func TestBashTool_NonZeroExitCode(t *testing.T) {
 	}
 }
 
-func TestBashTool_StderrOutput(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_StderrOutput(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command: shellCmd(
 			"echo error_msg >&2",
 			`[Console]::Error.WriteLine("error_msg")`,
@@ -113,8 +113,8 @@ func TestBashTool_StderrOutput(t *testing.T) {
 	}
 }
 
-func TestBashTool_CombinedStdoutStderr(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_CombinedStdoutStderr(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command: shellCmd(
 			"echo out && echo err >&2",
 			`Write-Output "out"; [Console]::Error.WriteLine("err")`,
@@ -129,15 +129,15 @@ func TestBashTool_CombinedStdoutStderr(t *testing.T) {
 	}
 }
 
-func TestBashTool_StderrPreviewPrefix(t *testing.T) {
-	raw, _ := json.Marshal(BashInput{
+func TestShellTool_StderrPreviewPrefix(t *testing.T) {
+	raw, _ := json.Marshal(ShellInput{
 		Command: shellCmd(
 			"echo out && echo err_line >&2",
 			`Write-Output "out"; [Console]::Error.WriteLine("err_line")`,
 		),
 		Description: "Stdout and stderr preview",
 	})
-	tool := &BashTool{}
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	_, err := tool.Execute(raw, ch)
 	close(ch)
@@ -175,8 +175,8 @@ func TestBashTool_StderrPreviewPrefix(t *testing.T) {
 	}
 }
 
-func TestBashTool_EmptyCommand(t *testing.T) {
-	_, err := executeBash(t, BashInput{
+func TestShellTool_EmptyCommand(t *testing.T) {
+	_, err := executeShell(t, ShellInput{
 		Command:     "",
 		Description: "Empty command",
 	})
@@ -188,8 +188,8 @@ func TestBashTool_EmptyCommand(t *testing.T) {
 	}
 }
 
-func TestBashTool_Timeout(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_Timeout(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command:     shellCmd("sleep 10", "Start-Sleep -Seconds 10"),
 		Description: "Sleep that should timeout",
 		Timeout:     500, // 500ms timeout
@@ -202,10 +202,10 @@ func TestBashTool_Timeout(t *testing.T) {
 	}
 }
 
-func TestBashTool_TimeoutClamped(t *testing.T) {
+func TestShellTool_TimeoutClamped(t *testing.T) {
 	// Verify that timeout > 600000 is clamped (we can't easily test the actual
 	// clamping without waiting, but we verify it doesn't error)
-	result, err := executeBash(t, BashInput{
+	result, err := executeShell(t, ShellInput{
 		Command:     "echo ok",
 		Description: "Test timeout clamping",
 		Timeout:     999999,
@@ -218,8 +218,8 @@ func TestBashTool_TimeoutClamped(t *testing.T) {
 	}
 }
 
-func TestBashTool_PipedCommands(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_PipedCommands(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command: shellCmd(
 			"echo 'hello world' | tr ' ' '_'",
 			`"hello world" -replace ' ','_'`,
@@ -234,8 +234,8 @@ func TestBashTool_PipedCommands(t *testing.T) {
 	}
 }
 
-func TestBashTool_ChainedCommands(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_ChainedCommands(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		// Semicolon chaining works on both bash and PowerShell.
 		Command:     "echo first; echo second",
 		Description: "Chained commands",
@@ -248,8 +248,8 @@ func TestBashTool_ChainedCommands(t *testing.T) {
 	}
 }
 
-func TestBashTool_EnvironmentVariables(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_EnvironmentVariables(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command: shellCmd(
 			"echo $HOME",
 			`Write-Output $env:USERPROFILE`,
@@ -265,8 +265,8 @@ func TestBashTool_EnvironmentVariables(t *testing.T) {
 	}
 }
 
-func TestBashTool_WorkingDirectory(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_WorkingDirectory(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command:     "pwd",
 		Description: "Print working directory",
 	})
@@ -278,12 +278,12 @@ func TestBashTool_WorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestBashTool_EmitsEvent(t *testing.T) {
-	raw, _ := json.Marshal(BashInput{
+func TestShellTool_EmitsEvent(t *testing.T) {
+	raw, _ := json.Marshal(ShellInput{
 		Command:     "echo test",
 		Description: "Test event emission",
 	})
-	tool := &BashTool{}
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	_, err := tool.Execute(raw, ch)
 	close(ch)
@@ -310,12 +310,12 @@ func TestBashTool_EmitsEvent(t *testing.T) {
 	}
 }
 
-func TestBashTool_EventShowsErrorExitCode(t *testing.T) {
-	raw, _ := json.Marshal(BashInput{
+func TestShellTool_EventShowsErrorExitCode(t *testing.T) {
+	raw, _ := json.Marshal(ShellInput{
 		Command:     "exit 1",
 		Description: "Failing command",
 	})
-	tool := &BashTool{}
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	_, err := tool.Execute(raw, ch)
 	close(ch)
@@ -335,13 +335,13 @@ func TestBashTool_EventShowsErrorExitCode(t *testing.T) {
 	}
 }
 
-func TestBashTool_PreviewTruncation(t *testing.T) {
+func TestShellTool_PreviewTruncation(t *testing.T) {
 	// Generate more than 5 lines of output
-	raw, _ := json.Marshal(BashInput{
+	raw, _ := json.Marshal(ShellInput{
 		Command:     shellCmd("seq 1 10", "1..10"),
 		Description: "Generate 10 lines",
 	})
-	tool := &BashTool{}
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	_, err := tool.Execute(raw, ch)
 	close(ch)
@@ -365,10 +365,10 @@ func TestBashTool_PreviewTruncation(t *testing.T) {
 	}
 }
 
-func TestBashTool_UsesUserShell(t *testing.T) {
+func TestShellTool_UsesUserShell(t *testing.T) {
 	// Print something that identifies the shell.
 	cmd := shellCmd("echo $0", `$PSVersionTable.PSEdition`)
-	result, err := executeBash(t, BashInput{
+	result, err := executeShell(t, ShellInput{
 		Command:     cmd,
 		Description: "Print shell identifier",
 	})
@@ -381,8 +381,8 @@ func TestBashTool_UsesUserShell(t *testing.T) {
 	}
 }
 
-func TestBashTool_InvalidJSON(t *testing.T) {
-	tool := &BashTool{}
+func TestShellTool_InvalidJSON(t *testing.T) {
+	tool := &ShellTool{}
 	ch := makeEventsCh()
 	_, err := tool.Execute(json.RawMessage(`{invalid`), ch)
 	close(ch)
@@ -394,8 +394,8 @@ func TestBashTool_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBashTool_FailedCommand(t *testing.T) {
-	result, err := executeBash(t, BashInput{
+func TestShellTool_FailedCommand(t *testing.T) {
+	result, err := executeShell(t, ShellInput{
 		Command: shellCmd(
 			"ls /nonexistent_directory_12345",
 			"Get-ChildItem C:\\nonexistent_directory_12345_xyzzy",

@@ -20,7 +20,7 @@ func buildToolManager() (*tools.Manager, *tools.CompactState, tools.TodoStore, *
 	toolManager.Register(&tools.WriteTool{})
 	toolManager.Register(&tools.EditTool{})
 	toolManager.Register(&tools.GlobTool{})
-	toolManager.Register(&tools.BashTool{})
+	toolManager.Register(&tools.ShellTool{})
 	toolManager.Register(&tools.WebSearchTool{})
 	toolManager.Register(&tools.LineCountTool{})
 	toolManager.Register(&tools.FileSizeTool{})
