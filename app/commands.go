@@ -199,7 +199,7 @@ func (d *CommandDispatcher) handleHistory(args string, dimStyle, errorStyle func
 		return
 	}
 
-	convs, err := d.config.ConvManager.List(strings.Contains(args, "--all"))
+	convs, err := d.config.ConvManager.List(strings.Contains(args, "--all"), 20)
 	if err != nil {
 		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error loading history: %v", err))))
 		return
@@ -239,7 +239,7 @@ func (d *CommandDispatcher) handleSearch(query string, dimStyle, errorStyle func
 		return
 	}
 
-	results, err := d.config.ConvManager.Search(query, showAll)
+	results, err := d.config.ConvManager.Search(query, showAll, 20)
 	if err != nil {
 		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error searching: %v", err))))
 		return

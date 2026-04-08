@@ -96,7 +96,7 @@ func TestList(t *testing.T) {
 	conv2, _ := mgr.Create("Second")
 
 	// List
-	list, err := mgr.List(true)
+	list, err := mgr.List(true, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestSearch(t *testing.T) {
 	mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleAssistant, "Goodbye world"))
 
 	// Search for "hello" (case insensitive)
-	results, err := mgr.Search("HELLO", true)
+	results, err := mgr.Search("HELLO", true, 0)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSearch(t *testing.T) {
 	}
 
 	// Search for "world"
-	results, err = mgr.Search("world", true)
+	results, err = mgr.Search("world", true, 0)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSearch(t *testing.T) {
 	}
 
 	// Search for non-existent
-	results, err = mgr.Search("nonexistent", true)
+	results, err = mgr.Search("nonexistent", true, 0)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestConcurrentListAndAppend(t *testing.T) {
 	}()
 
 	for i := 0; i < 50; i++ {
-		_, err := mgr.List(true)
+		_, err := mgr.List(true, 0)
 		if err != nil {
 			t.Errorf("List failed: %v", err)
 		}
@@ -402,7 +402,7 @@ func TestDirectoryScopedList(t *testing.T) {
 	conv2, _ := mgr2.Create("Beta Conv")
 
 	// Default list (scoped)
-	alphaList, _ := mgr.List(false)
+	alphaList, _ := mgr.List(false, 0)
 	if len(alphaList) != 1 {
 		t.Errorf("expected 1 scoped conversation, got %d", len(alphaList))
 	}
@@ -411,12 +411,33 @@ func TestDirectoryScopedList(t *testing.T) {
 	}
 
 	// List all
-	allList, _ := mgr.List(true)
+	allList, _ := mgr.List(true, 0)
 	if len(allList) != 2 {
 		t.Errorf("expected 2 total conversations, got %d", len(allList))
 	}
 
 	_ = conv2
+}
+
+func TestListWithLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir, "/test")
+
+	for i := 0; i < 10; i++ {
+		mgr.Create(fmt.Sprintf("Conv %d", i))
+	}
+
+	// Limited
+	list, _ := mgr.List(true, 5)
+	if len(list) != 5 {
+		t.Errorf("expected 5 conversations, got %d", len(list))
+	}
+
+	// Unlimited (0 = no limit)
+	all, _ := mgr.List(true, 0)
+	if len(all) != 10 {
+		t.Errorf("expected 10 conversations, got %d", len(all))
+	}
 }
 
 func TestMain(m *testing.M) {

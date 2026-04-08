@@ -130,7 +130,7 @@ func (m *Manager) AppendMessage(id string, msg llm.Message) error {
 
 // List returns metadata for all conversations, sorted by updated_at desc.
 // If showAll is false, only conversations from the current working directory are returned.
-func (m *Manager) List(showAll bool) ([]Metadata, error) {
+func (m *Manager) List(showAll bool, limit int) ([]Metadata, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -166,12 +166,16 @@ func (m *Manager) List(showAll bool) ([]Metadata, error) {
 		return metas[i].UpdatedAt.After(metas[j].UpdatedAt)
 	})
 
+	if limit > 0 && len(metas) > limit {
+		metas = metas[:limit]
+	}
+
 	return metas, nil
 }
 
 // Search searches all conversations for the given query (case-insensitive).
 // Returns conversation IDs that contain the query in any message content.
-func (m *Manager) Search(query string, showAll bool) ([]SearchResult, error) {
+func (m *Manager) Search(query string, showAll bool, limit int) ([]SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -209,6 +213,10 @@ func (m *Manager) Search(query string, showAll bool) ([]SearchResult, error) {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].UpdatedAt.After(results[j].UpdatedAt)
 	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
 
 	return results, nil
 }
