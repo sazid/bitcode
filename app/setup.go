@@ -81,6 +81,18 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 		Active:   true,
 	})
 
+	mgr.Register(reminder.Reminder{
+		ID:      "core-behavior",
+		Content: "Remember: Read files before editing. Don't over-engineer — only change what was asked. Restate the user's intent before starting work. Keep responses brief with progress updates.",
+		Schedule: reminder.Schedule{
+			Kind:         reminder.ScheduleTurn,
+			TurnInterval: 17,
+		},
+		Source:   "builtin",
+		Priority: 1,
+		Active:   true,
+	})
+
 	if len(instructionFiles) > 0 {
 		mgr.Register(reminder.Reminder{
 			ID:      "instruction-files",

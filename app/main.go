@@ -181,7 +181,7 @@ func main() {
 
 func newConversation(config *AgentConfig) ([]llm.Message, []llm.ToolDef) {
 	messages := []llm.Message{
-		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.SkillManager, config.InstructionFiles, config.AgentRegistry)),
+		llm.TextMessage(llm.RoleSystem, buildSystemPrompt(config.AgentRegistry)),
 	}
 	return messages, toolDefsFromManager(config.Tools)
 }
