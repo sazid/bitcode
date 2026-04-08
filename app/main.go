@@ -34,6 +34,8 @@ func main() {
 	flag.StringVar(&reasoningEffort, "reasoning", "", "Reasoning effort: low, medium, high (omit to let the model decide)")
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.IntVar(&maxTurns, "max-turns", defaultMaxAgentTurns, "Maximum number of agent turns per conversation")
+	var continueID string
+	flag.StringVar(&continueID, "c", "", "Resume a conversation by ID")
 	flag.Parse()
 
 	if showVersion {
@@ -113,7 +115,35 @@ func main() {
 		ConvManager:      convManager,
 	}
 
-	if prompt != "" {
+	if continueID != "" && convManager != nil && prompt != "" {
+		conv, err := convManager.Load(continueID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading conversation %s: %v\n", continueID, err)
+			os.Exit(1)
+		}
+		agentConfig.ConvID = conv.ID
+
+		observer.RecordSessionStart("single-shot-resume")
+		messages, toolDefs := newConversation(agentConfig)
+		messages = append(messages, conv.Messages...)
+		messages = append(messages, llm.TextMessage(llm.RoleUser, prompt))
+		if err := convManager.AppendMessage(conv.ID, llm.TextMessage(llm.RoleUser, prompt)); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to persist user message: %v\n", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		go func() { <-sigCh; cancel() }()
+
+		agentConfig.TaskTitle = prompt
+		runAgentLoop(ctx, agentConfig, &messages, toolDefs, singleShotCallbacks(themes, agentConfig.TodoStore))
+
+		title := "BitCode: " + notify.Truncate(agentConfig.TaskTitle, 40)
+		notify.Send(title, "Finished working")
+		observer.Close()
+	} else if prompt != "" {
 		observer.RecordSessionStart("single-shot")
 		runSingleShot(agentConfig, themes, prompt)
 		observer.Close()
