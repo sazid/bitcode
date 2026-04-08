@@ -13,6 +13,8 @@ func DetectLanguage(evalCtx *EvalContext) string {
 	switch evalCtx.ToolName {
 	case "Bash":
 		return detectBashLanguage(evalCtx.Input)
+	case "PowerShell":
+		return detectPowerShellLanguage(evalCtx.Input)
 	case "Write", "Edit":
 		return detectFileLanguage(evalCtx.Input)
 	}
@@ -46,6 +48,35 @@ func detectBashLanguage(input json.RawMessage) string {
 
 	// Default: it's a Bash command
 	return "bash"
+}
+
+// detectPowerShellLanguage identifies the language from a PowerShell command string.
+func detectPowerShellLanguage(input json.RawMessage) string {
+	var params struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(input, &params); err != nil {
+		return "powershell"
+	}
+	cmd := strings.TrimSpace(params.Command)
+
+	// Python
+	if hasAnyPrefix(cmd, "python ", "python3 ", "uv run ", "uv run python", "python -c", "python3 -c") {
+		return "python"
+	}
+
+	// Go
+	if hasAnyPrefix(cmd, "go run ", "go build ", "go test ", "go generate") {
+		return "go"
+	}
+
+	// JavaScript / TypeScript
+	if hasAnyPrefix(cmd, "node ", "node -e", "deno ", "bun ", "npx ", "ts-node ", "tsx ") {
+		return "js"
+	}
+
+	// Default: it's a PowerShell command
+	return "powershell"
 }
 
 // detectFileLanguage identifies the language from a file path in Write/Edit input.
