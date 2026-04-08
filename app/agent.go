@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/conversation"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/reminder"
@@ -32,6 +34,8 @@ type AgentConfig struct {
 	InjectedMessages chan string // optional; user messages injected mid-flight
 	Observer         telemetry.Observer
 	TurnCounter      *telemetry.TurnCounter
+	ConvManager      *conversation.Manager // optional; conversation persistence
+	ConvID           string                // current conversation ID
 }
 
 type AgentCallbacks struct {
@@ -200,6 +204,13 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 		// Store the original response in the real message history
 		*messages = append(*messages, resp.Message)
 
+		// Persist to conversation storage
+		if cfg.ConvManager != nil && cfg.ConvID != "" {
+			if err := cfg.ConvManager.AppendMessage(cfg.ConvID, resp.Message); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to persist message: %v\n", err)
+			}
+		}
+
 		if text := resp.Message.Text(); text != "" && cb.OnContent != nil {
 			cb.OnContent(text)
 		}
@@ -272,11 +283,19 @@ func runAgentLoop(ctx context.Context, cfg *AgentConfig, messages *[]llm.Message
 					}
 					content = fmt.Sprintf("Error: %v", err)
 				}
-				*messages = append(*messages, llm.Message{
+				toolMsg := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: content}},
 					ToolCallID: tc.ID,
-				})
+				}
+				*messages = append(*messages, toolMsg)
+
+				// Persist tool result to conversation storage
+				if cfg.ConvManager != nil && cfg.ConvID != "" {
+					if err := cfg.ConvManager.AppendMessage(cfg.ConvID, toolMsg); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to persist tool result: %v\n", err)
+					}
+				}
 
 				// Drain injected messages after each tool execution
 				drainInjectedMessages(cfg, messages)

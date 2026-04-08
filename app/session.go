@@ -692,6 +692,10 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, themes *ThemeRegistry,
 					return
 				}
 				if dr.Handled {
+					// If the command returned messages (e.g., from /resume), update the orchestrator state
+					if len(dr.Messages) > 0 {
+						messages = dr.Messages
+					}
 					continue
 				}
 				text = dr.Text
@@ -715,7 +719,21 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, themes *ThemeRegistry,
 				lifecycle.InjectMessage(text)
 			} else {
 				config.TaskTitle = text
-				messages = append(messages, llm.TextMessage(llm.RoleUser, text))
+				// Create a new conversation if none is active
+				if config.ConvManager != nil && config.ConvID == "" {
+					if conv, err := config.ConvManager.Create(text); err == nil {
+						config.ConvID = conv.ID
+						p.Send(newConversationMsg{taskID: conv.ID})
+					}
+				}
+				userMsg := llm.TextMessage(llm.RoleUser, text)
+				messages = append(messages, userMsg)
+				// Persist user message
+				if config.ConvManager != nil && config.ConvID != "" {
+					if err := config.ConvManager.AppendMessage(config.ConvID, userMsg); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to persist user message: %v\n", err)
+					}
+				}
 				lifecycle.Start(context.Background(), &messages, toolDefs)
 			}
 
