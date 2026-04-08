@@ -18,6 +18,9 @@ var simulateMD []byte
 //go:embed skills/bash.md
 var bashMD []byte
 
+//go:embed skills/powershell.md
+var powershellMD []byte
+
 //go:embed skills/python.md
 var pythonMD []byte
 
@@ -31,11 +34,12 @@ var jsMD []byte
 // We use individual embed directives because Go's embed.FS requires directory
 // paths to be known at compile time, and we want them addressable as a package.
 var embeddedGuardSkills = map[string][]byte{
-	"simulate.md": simulateMD,
-	"bash.md":     bashMD,
-	"python.md":   pythonMD,
-	"go.md":       goMD,
-	"js.md":       jsMD,
+	"simulate.md":  simulateMD,
+	"bash.md":      bashMD,
+	"powershell.md": powershellMD,
+	"python.md":    pythonMD,
+	"go.md":        goMD,
+	"js.md":        jsMD,
 }
 
 // NewGuardSkillManager creates a skills.Manager pre-loaded with the built-in

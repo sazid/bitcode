@@ -139,6 +139,30 @@ var denyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bRemove-Item\b.*\$HOME\b`),
 	// PowerShell: Format-Volume (disk format)
 	regexp.MustCompile(`(?i)\bFormat-Volume\b`),
+
+	// PowerShell: Encoded/obfuscated command execution
+	regexp.MustCompile(`(?i)(powershell|pwsh)\s+.*-enc(odedcommand)?\s`),
+
+	// PowerShell: AMSI bypass (disables PowerShell's primary security layer)
+	regexp.MustCompile(`(?i)System\.Management\.Automation\.Amsi`),
+	regexp.MustCompile(`(?i)\[Ref\]\.Assembly\.GetType`),
+
+	// PowerShell: Execution Policy bypass
+	regexp.MustCompile(`(?i)(powershell|pwsh)\s+.*-e(xecutionpolicy)?\p{L}*\s+(Bypass|Unrestricted)`),
+
+	// PowerShell: ScriptBlock/Reflection-based execution
+	regexp.MustCompile(`(?i)\[ScriptBlock\]::Create\(`),
+	regexp.MustCompile(`(?i)\[PowerShell\]::Create\(\)`),
+
+	// PowerShell: .NET reflection (arbitrary assembly loading)
+	regexp.MustCompile(`(?i)\[System\.Reflection\.Assembly\]::(Load|LoadFile|LoadFrom)\(`),
+
+	// PowerShell: Defender/security tampering
+	regexp.MustCompile(`(?i)\bSet-MpPreference\b.*-Disable`),
+	regexp.MustCompile(`(?i)\bAdd-MpPreference\b.*-Exclusion`),
+
+	// PowerShell: Constrained Language Mode bypass
+	regexp.MustCompile(`(?i)\.LanguageMode\s*=\s*['"]?FullLanguage`),
 }
 
 // Patterns that require user approval (Unix + PowerShell).
@@ -164,6 +188,26 @@ var askPatterns = []struct {
 	{regexp.MustCompile(`(?i)\b(Invoke-Expression|iex)\s*\(?\s*(Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b`), "download-and-execute is dangerous"},
 	// PowerShell: Start-Process as Administrator
 	{regexp.MustCompile(`(?i)\bStart-Process\b.*-Verb\s+RunAs\b`), "running as Administrator requires approval"},
+	// PowerShell: Download cradles (network fetch + potential execute)
+	{regexp.MustCompile(`(?i)\bNew-Object\b.*\bNet\.WebClient\b`), "WebClient download cradle requires approval"},
+	{regexp.MustCompile(`(?i)\bSystem\.Net\.WebClient\b`), "WebClient usage requires approval"},
+	// PowerShell: Base64 decoding (can be used for obfuscation but also has legitimate uses)
+	{regexp.MustCompile(`(?i)\[System\.Convert\]::FromBase64String`), "Base64 decoding requires approval"},
+	// PowerShell: Dynamic invocation via ExecutionContext
+	{regexp.MustCompile(`(?i)\$ExecutionContext\.InvokeCommand\.(ExpandString|InvokeScript|NewScriptBlock)`), "dynamic code execution requires approval"},
+	// PowerShell: WMI process creation
+	{regexp.MustCompile(`(?i)\bInvoke-WmiMethod\b.*\bWin32_Process\b`), "WMI process creation requires approval"},
+	{regexp.MustCompile(`(?i)\bInvoke-CimMethod\b.*\bWin32_Process\b`), "CIM process creation requires approval"},
+	// PowerShell: Registry persistence paths
+	{regexp.MustCompile(`(?i)(Set-ItemProperty|New-ItemProperty|Remove-ItemProperty).*(HKLM|HKCU).*(Run|RunOnce|Winlogon)`), "registry persistence path modification requires approval"},
+	// PowerShell: COM object instantiation (scriptable shell/network objects)
+	{regexp.MustCompile(`(?i)\bNew-Object\b.*-ComObject\b`), "COM object creation requires approval"},
+	// PowerShell: Credential access
+	{regexp.MustCompile(`(?i)\bGet-Credential\b`), "credential prompt requires approval"},
+	{regexp.MustCompile(`(?i)\bGet-StoredCredential\b`), "credential store access requires approval"},
+	{regexp.MustCompile(`(?i)\bvaultcmd\b`), "credential vault access requires approval"},
+	// PowerShell: Hidden window execution
+	{regexp.MustCompile(`(?i)(powershell|pwsh)\s+.*-W(indowStyle)?\s+Hidden`), "hidden window execution requires approval"},
 }
 
 func (r *DangerousCommandRule) Evaluate(ctx *EvalContext) *Decision {

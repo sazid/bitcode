@@ -55,7 +55,11 @@ func platformPrivilegeEscalationRule() string {
 	if runtime.GOOS == "windows" {
 		return "Prevent privilege escalation (running as Administrator without justification via Start-Process -Verb RunAs, " +
 			"modifying system directories like C:\\Windows or C:\\Program Files, " +
-			"disabling Windows Defender or UAC)"
+			"disabling Windows Defender or UAC, " +
+			"PowerShell encoded/obfuscated commands, " +
+			"AMSI bypass attempts, " +
+			"WMI/CIM-based process creation, " +
+			"registry persistence via Run/RunOnce keys)"
 	}
 	return "Prevent privilege escalation (sudo without justification, chmod 777 on critical paths, writing to /etc or /usr)"
 }
