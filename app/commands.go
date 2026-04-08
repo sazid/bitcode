@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,9 +20,10 @@ type CommandDispatcher struct {
 
 // DispatchResult describes what happened after dispatching a command.
 type DispatchResult struct {
-	Handled bool   // true if the command was fully handled (no agent input needed)
-	Text    string // non-empty text to send to the agent (for skill invocations)
-	Quit    bool   // true if the user wants to exit
+	Handled  bool          // true if the command was fully handled (no agent input needed)
+	Text     string        // non-empty text to send to the agent (for skill invocations)
+	Quit     bool          // true if the user wants to exit
+	Messages []llm.Message // optional: pre-loaded messages for resumed conversations
 }
 
 func NewCommandDispatcher(config *AgentConfig, themes *ThemeRegistry, p *tea.Program) *CommandDispatcher {
@@ -52,6 +54,7 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 		} else {
 			d.config.TodoStore.Clear()
 			resetConversation()
+			d.config.ConvID = "" // Clear current conversation ID
 			newTaskID := GenerateTaskID()
 			if d.config.Observer != nil {
 				d.config.Observer.ResetSession(newTaskID)
@@ -90,6 +93,24 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 		} else {
 			d.p.Send(appendOutputMsg(dimStyle().Render("\n  Telemetry not enabled")))
 		}
+		return DispatchResult{Handled: true}
+
+	case "/history":
+		d.handleHistory(cmdArgs, dimStyle, errorStyle)
+		return DispatchResult{Handled: true}
+
+	case "/search":
+		d.handleSearch(cmdArgs, dimStyle, errorStyle)
+		return DispatchResult{Handled: true}
+
+	case "/resume":
+		return d.handleResume(cmdArgs, agentRunning, resetConversation, dimStyle, errorStyle, successStyle)
+
+	case "/fork":
+		return d.handleFork(cmdArgs, agentRunning, resetConversation, dimStyle, errorStyle, successStyle)
+
+	case "/rename":
+		d.handleRename(cmdArgs, dimStyle, errorStyle, successStyle)
 		return DispatchResult{Handled: true}
 
 	default:
@@ -169,4 +190,190 @@ func (d *CommandDispatcher) handleSkillOrUnknown(cmdName, cmdArgs string, errorS
 	d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Unknown command: %s", cmdName))))
 	d.p.Send(appendOutputMsg(dimStyle().Render("  Type /help for available commands")))
 	return DispatchResult{Handled: true}
+}
+
+// handleHistory lists recent conversations.
+func (d *CommandDispatcher) handleHistory(args string, dimStyle, errorStyle func() lipgloss.Style) {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return
+	}
+
+	convs, err := d.config.ConvManager.List(strings.Contains(args, "--all"))
+	if err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error loading history: %v", err))))
+		return
+	}
+
+	if len(convs) == 0 {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  No conversations found")))
+		return
+	}
+
+	var buf strings.Builder
+	buf.WriteString("\n  Recent conversations:\n")
+	for _, conv := range convs {
+		buf.WriteString(fmt.Sprintf("    %s  %s  (%d messages, %s)\n",
+			conv.ID,
+			conv.Title,
+			conv.MessageCount,
+			conv.UpdatedAt.Format("Jan 2 15:04")))
+	}
+	d.p.Send(appendOutputMsg(dimStyle().Render(buf.String())))
+}
+
+// handleSearch searches conversations for a query.
+func (d *CommandDispatcher) handleSearch(query string, dimStyle, errorStyle func() lipgloss.Style) {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return
+	}
+
+	showAll := strings.Contains(query, "--all")
+	if showAll {
+		query = strings.TrimSpace(strings.ReplaceAll(query, "--all", ""))
+	}
+
+	if query == "" {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /search <query> [--all]")))
+		return
+	}
+
+	results, err := d.config.ConvManager.Search(query, showAll)
+	if err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error searching: %v", err))))
+		return
+	}
+
+	if len(results) == 0 {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  No matches found")))
+		return
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("\n  Found %d conversation(s) matching %q:\n", len(results), query))
+	for _, res := range results {
+		buf.WriteString(fmt.Sprintf("    %s  %s  (%d matches)\n",
+			res.ID,
+			res.Title,
+			len(res.Matches)))
+	}
+	d.p.Send(appendOutputMsg(dimStyle().Render(buf.String())))
+}
+
+// handleResume resumes a conversation by ID.
+func (d *CommandDispatcher) handleResume(args string, agentRunning bool, resetConversation func() ([]llm.Message, []llm.ToolDef), dimStyle, errorStyle, successStyle func() lipgloss.Style) DispatchResult {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return DispatchResult{Handled: true}
+	}
+
+	if args == "" {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /resume <conversation-id>")))
+		return DispatchResult{Handled: true}
+	}
+
+	if agentRunning {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Cannot resume while agent is running. Press Ctrl+C first.")))
+		return DispatchResult{Handled: true}
+	}
+
+	conv, err := d.config.ConvManager.Load(args)
+	if err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error loading conversation: %v", err))))
+		return DispatchResult{Handled: true}
+	}
+
+	// Reset conversation and load messages
+	d.config.TodoStore.Clear()
+	newMessages, _ := resetConversation()
+
+	// Set the conversation ID and messages (merge system prompt with loaded messages)
+	d.config.ConvID = conv.ID
+
+	d.p.Send(newConversationMsg{taskID: conv.ID})
+	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Resumed conversation: %s (%d messages)", conv.Title, len(conv.Messages)))))
+
+	// Return the loaded messages to be used by the orchestrator
+	// Keep the system prompt from newMessages[0] and append loaded messages
+	return DispatchResult{
+		Handled:  true,
+		Messages: append([]llm.Message{newMessages[0]}, conv.Messages...),
+	}
+}
+
+// handleFork forks a conversation at a specific message index.
+func (d *CommandDispatcher) handleFork(args string, agentRunning bool, resetConversation func() ([]llm.Message, []llm.ToolDef), dimStyle, errorStyle, successStyle func() lipgloss.Style) DispatchResult {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return DispatchResult{Handled: true}
+	}
+
+	if args == "" {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /fork <conversation-id> [message-index]")))
+		return DispatchResult{Handled: true}
+	}
+
+	if agentRunning {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Cannot fork while agent is running. Press Ctrl+C first.")))
+		return DispatchResult{Handled: true}
+	}
+
+	// Parse args: "conv-id" or "conv-id 5"
+	parts := strings.Fields(args)
+	convID := parts[0]
+	msgIdx := -1
+	if len(parts) > 1 {
+		if n, err := strconv.Atoi(parts[1]); err == nil {
+			msgIdx = n
+		}
+	}
+
+	source, err := d.config.ConvManager.Load(convID)
+	if err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error loading conversation: %v", err))))
+		return DispatchResult{Handled: true}
+	}
+
+	newTitle := "Fork of " + source.Title
+	forked, err := d.config.ConvManager.Fork(convID, newTitle, msgIdx)
+	if err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error forking conversation: %v", err))))
+		return DispatchResult{Handled: true}
+	}
+
+	// Reset and switch to forked conversation
+	d.config.TodoStore.Clear()
+	resetConversation()
+	d.config.ConvID = forked.ID
+
+	d.p.Send(newConversationMsg{taskID: forked.ID})
+	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Created fork: %s -> %s (%d messages)", source.ID, forked.ID, len(forked.Messages)))))
+
+	return DispatchResult{Handled: true}
+}
+
+// handleRename renames the current conversation.
+func (d *CommandDispatcher) handleRename(args string, dimStyle, errorStyle, successStyle func() lipgloss.Style) {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return
+	}
+
+	if d.config.ConvID == "" {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  No active conversation to rename")))
+		return
+	}
+
+	if args == "" {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /rename <new-title>")))
+		return
+	}
+
+	if err := d.config.ConvManager.Rename(d.config.ConvID, args); err != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error renaming conversation: %v", err))))
+		return
+	}
+
+	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Renamed conversation to: %s", args))))
 }

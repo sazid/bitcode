@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joho/godotenv"
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/conversation"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/notify"
@@ -61,6 +62,17 @@ func main() {
 	reminderMgr := buildReminderManager(skillManager, instructionFiles)
 	guardMgr := buildGuardManager(providerCfg)
 
+	// Initialize conversation manager
+	var convManager *conversation.Manager
+	if os.Getenv("BITCODE_CONVERSATIONS") != "false" {
+		cwd, _ := os.Getwd()
+		var err error
+		convManager, err = conversation.NewManager(conversation.DefaultDir(), cwd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: conversation persistence disabled (%v)\n", err)
+		}
+	}
+
 	if prompt != "" {
 		guardMgr.SetPermissionHandler(guard.AutoDenyHandler())
 	}
@@ -98,6 +110,7 @@ func main() {
 		InstructionFiles: instructionFiles,
 		Observer:         observer,
 		TurnCounter:      turnCounter,
+		ConvManager:      convManager,
 	}
 
 	if prompt != "" {
@@ -256,6 +269,11 @@ func resolveProviderConfig() llm.ProviderConfig {
 func buildSlashCommands(config *AgentConfig) []SlashCommand {
 	commands := []SlashCommand{
 		{Name: "new", Description: "Start a new conversation", Source: "builtin"},
+		{Name: "history", Description: "List recent conversations", Source: "builtin"},
+		{Name: "search", Description: "Search conversations (usage: /search <query>)", Source: "builtin"},
+		{Name: "resume", Description: "Resume a conversation (usage: /resume <id>)", Source: "builtin"},
+		{Name: "fork", Description: "Fork a conversation (usage: /fork <id> [msg-index])", Source: "builtin"},
+		{Name: "rename", Description: "Rename current conversation", Source: "builtin"},
 		{Name: "reasoning", Description: "Set reasoning effort (none/low/medium/high/xhigh)", Source: "builtin"},
 		{Name: "turns", Description: "Get or set max agent turns", Source: "builtin"},
 		{Name: "theme", Description: "Switch theme (dark/light/mono)", Source: "builtin"},

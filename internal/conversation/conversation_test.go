@@ -12,7 +12,7 @@ import (
 
 func TestManagerCreateAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestManagerCreateAndLoad(t *testing.T) {
 
 func TestAppendMessage(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestAppendMessage(t *testing.T) {
 
 func TestList(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestList(t *testing.T) {
 	conv2, _ := mgr.Create("Second")
 
 	// List
-	list, err := mgr.List()
+	list, err := mgr.List(true)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestList(t *testing.T) {
 
 func TestSearch(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestSearch(t *testing.T) {
 	mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleAssistant, "Goodbye world"))
 
 	// Search for "hello" (case insensitive)
-	results, err := mgr.Search("HELLO")
+	results, err := mgr.Search("HELLO", true)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSearch(t *testing.T) {
 	}
 
 	// Search for "world"
-	results, err = mgr.Search("world")
+	results, err = mgr.Search("world", true)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSearch(t *testing.T) {
 	}
 
 	// Search for non-existent
-	results, err = mgr.Search("nonexistent")
+	results, err = mgr.Search("nonexistent", true)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestSearch(t *testing.T) {
 
 func TestFork(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestFork(t *testing.T) {
 
 func TestRename(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestRename(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -312,7 +312,7 @@ func containsHelper(s, substr string) bool {
 
 func TestLoadConversationWithLargeMessages(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestLoadConversationWithLargeMessages(t *testing.T) {
 
 func TestMessageCountComputedOnLoad(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestMessageCountComputedOnLoad(t *testing.T) {
 
 func TestConcurrentListAndAppend(t *testing.T) {
 	tmpDir := t.TempDir()
-	mgr, err := NewManager(tmpDir)
+	mgr, err := NewManager(tmpDir, "/test")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -381,12 +381,42 @@ func TestConcurrentListAndAppend(t *testing.T) {
 	}()
 
 	for i := 0; i < 50; i++ {
-		_, err := mgr.List()
+		_, err := mgr.List(true)
 		if err != nil {
 			t.Errorf("List failed: %v", err)
 		}
 	}
 	<-done
+}
+
+func TestDirectoryScopedList(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(tmpDir, "/project/alpha")
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	conv1, _ := mgr.Create("Alpha Conv")
+
+	mgr2, _ := NewManager(tmpDir, "/project/beta")
+	conv2, _ := mgr2.Create("Beta Conv")
+
+	// Default list (scoped)
+	alphaList, _ := mgr.List(false)
+	if len(alphaList) != 1 {
+		t.Errorf("expected 1 scoped conversation, got %d", len(alphaList))
+	}
+	if alphaList[0].ID != conv1.ID {
+		t.Errorf("expected conv %s, got %s", conv1.ID, alphaList[0].ID)
+	}
+
+	// List all
+	allList, _ := mgr.List(true)
+	if len(allList) != 2 {
+		t.Errorf("expected 2 total conversations, got %d", len(allList))
+	}
+
+	_ = conv2
 }
 
 func TestMain(m *testing.M) {

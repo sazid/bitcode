@@ -20,6 +20,7 @@ import (
 type Metadata struct {
 	ID           string    `json:"id"`
 	Title        string    `json:"title"`
+	WorkDir      string    `json:"work_dir,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	MessageCount int       `json:"message_count"`
@@ -33,16 +34,17 @@ type Conversation struct {
 
 // Manager handles conversation persistence and retrieval.
 type Manager struct {
-	dir string
-	mu  sync.RWMutex
+	dir     string
+	workDir string
+	mu      sync.RWMutex
 }
 
 // NewManager creates a new conversation manager.
-func NewManager(dir string) (*Manager, error) {
+func NewManager(dir string, workDir string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create conversations dir: %w", err)
 	}
-	return &Manager{dir: dir}, nil
+	return &Manager{dir: dir, workDir: workDir}, nil
 }
 
 // DefaultDir returns the default conversations directory (~/.bitcode/conversations/).
@@ -61,6 +63,7 @@ func (m *Manager) Create(title string) (*Conversation, error) {
 		Metadata: Metadata{
 			ID:        generateID(),
 			Title:     truncateTitle(title),
+			WorkDir:   m.workDir,
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
@@ -126,7 +129,8 @@ func (m *Manager) AppendMessage(id string, msg llm.Message) error {
 }
 
 // List returns metadata for all conversations, sorted by updated_at desc.
-func (m *Manager) List() ([]Metadata, error) {
+// If showAll is false, only conversations from the current working directory are returned.
+func (m *Manager) List(showAll bool) ([]Metadata, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -152,6 +156,9 @@ func (m *Manager) List() ([]Metadata, error) {
 		if err != nil {
 			continue
 		}
+		if !showAll && meta.WorkDir != m.workDir {
+			continue
+		}
 		metas = append(metas, *meta)
 	}
 
@@ -164,7 +171,7 @@ func (m *Manager) List() ([]Metadata, error) {
 
 // Search searches all conversations for the given query (case-insensitive).
 // Returns conversation IDs that contain the query in any message content.
-func (m *Manager) Search(query string) ([]SearchResult, error) {
+func (m *Manager) Search(query string, showAll bool) ([]SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -184,6 +191,10 @@ func (m *Manager) Search(query string) ([]SearchResult, error) {
 		id := strings.TrimSuffix(entry.Name(), ".jsonl")
 		conv, err := m.loadByIDLocked(id)
 		if err != nil {
+			continue
+		}
+
+		if !showAll && conv.WorkDir != m.workDir {
 			continue
 		}
 
