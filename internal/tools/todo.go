@@ -11,10 +11,8 @@ import (
 
 // TodoItem represents a single task in the todo list.
 type TodoItem struct {
-	ID       string `json:"id"`
-	Content  string `json:"content"`
-	Status   string `json:"status"`   // "pending", "in_progress", "completed"
-	Priority string `json:"priority"` // "high", "medium", "low"
+	Content string `json:"content"`
+	Status  string `json:"status"` // "pending", "in_progress", "completed", "cancelled" (write-only for updates)
 }
 
 // TodoStore is the interface for todo list persistence.
@@ -81,7 +79,7 @@ func formatTodos(todos []TodoItem) []string {
 		default:
 			icon = "[ ]"
 		}
-		lines = append(lines, fmt.Sprintf("%s %s (%s)", icon, t.Content, t.Priority))
+		lines = append(lines, fmt.Sprintf("%s %s", icon, t.Content))
 	}
 	return lines
 }
@@ -92,7 +90,7 @@ type todoWriteInput struct {
 	Todos []TodoItem `json:"todos"`
 }
 
-// TodoWriteTool replaces the entire todo list.
+// TodoWriteTool incrementally updates the todo list.
 type TodoWriteTool struct {
 	Store TodoStore
 }
@@ -104,23 +102,16 @@ func (t *TodoWriteTool) Name() string { return "TodoWrite" }
 func (t *TodoWriteTool) Description() string {
 	return `Create and manage a structured task list for the current session.
 
-Each call REPLACES the entire todo list. Use this tool to:
-- Plan a multi-step task by writing all todos upfront
-- Mark a todo as in_progress before starting it (only one at a time)
-- Mark a todo as completed immediately after finishing it
-- Add, remove, or reprioritize todos as you learn more mid-task
+Each call PATCHES the existing todo list instead of replacing it.
+Use this tool to:
+- Add new tasks by sending new { content, status } items
+- Update an existing task by sending the same content with a new status
+- Remove a task by sending status: "cancelled"
+- Keep exactly one task in_progress at a time
+- Mark tasks completed immediately after implementation and verification
 
-For any non-trivial task, the FIRST todo should be:
-  "Write implementation plan to .bitcode/PLAN.md"
-This allows resuming work across sessions.
-
-You CANNOT stop working until all todos are completed.
-
-Parameters:
-- todos (required): Full replacement list of todo items
-  Each item: { id, content, status, priority }
-  status: "pending" | "in_progress" | "completed"
-  priority: "high" | "medium" | "low"`
+Matching is done by content. Unmentioned todos are preserved automatically.
+Statuses: "pending" | "in_progress" | "completed" | "cancelled"`
 }
 
 func (t *TodoWriteTool) ParametersSchema() map[string]any {
@@ -129,30 +120,21 @@ func (t *TodoWriteTool) ParametersSchema() map[string]any {
 		"properties": map[string]any{
 			"todos": map[string]any{
 				"type":        "array",
-				"description": "The full replacement todo list",
+				"description": "Todo items to add, update, or cancel. Unmentioned existing todos remain unchanged.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"id": map[string]any{
-							"type":        "string",
-							"description": "Unique identifier for the todo item",
-						},
 						"content": map[string]any{
 							"type":        "string",
-							"description": "Description of the task",
+							"description": "Task description. Used as the unique key to match an existing todo.",
 						},
 						"status": map[string]any{
 							"type":        "string",
-							"enum":        []string{"pending", "in_progress", "completed"},
-							"description": "Current status of the task",
-						},
-						"priority": map[string]any{
-							"type":        "string",
-							"enum":        []string{"high", "medium", "low"},
-							"description": "Priority level of the task",
+							"enum":        []string{"pending", "in_progress", "completed", "cancelled"},
+							"description": "Current task status. Use cancelled to remove the item from the list.",
 						},
 					},
-					"required": []string{"id", "content", "status", "priority"},
+					"required": []string{"content", "status"},
 				},
 			},
 		},
@@ -166,37 +148,83 @@ func (t *TodoWriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.
 		return ToolResult{}, fmt.Errorf("invalid input: %w", err)
 	}
 
-	validStatuses := map[string]bool{"pending": true, "in_progress": true, "completed": true}
-	validPriorities := map[string]bool{"high": true, "medium": true, "low": true}
+	if len(params.Todos) == 0 {
+		eventsCh <- internal.Event{
+			Name:        t.Name(),
+			Message:     "No changes",
+			PreviewType: internal.PreviewPlain,
+		}
+		return ToolResult{Content: "No todo changes provided. Existing todos were left unchanged."}, nil
+	}
+
+	validStatuses := map[string]bool{"pending": true, "in_progress": true, "completed": true, "cancelled": true}
+	updates := make(map[string]TodoItem, len(params.Todos))
+	orderedUpdates := make([]TodoItem, 0, len(params.Todos))
 
 	for i, item := range params.Todos {
-		if item.ID == "" {
-			return ToolResult{}, fmt.Errorf("todo item %d missing id", i)
-		}
-		if item.Content == "" {
+		if strings.TrimSpace(item.Content) == "" {
 			return ToolResult{}, fmt.Errorf("todo item %d missing content", i)
 		}
 		if !validStatuses[item.Status] {
-			return ToolResult{}, fmt.Errorf("todo item %q has invalid status %q (must be pending, in_progress, or completed)", item.ID, item.Status)
+			return ToolResult{}, fmt.Errorf("todo item %q has invalid status %q (must be pending, in_progress, completed, or cancelled)", item.Content, item.Status)
 		}
-		if !validPriorities[item.Priority] {
-			return ToolResult{}, fmt.Errorf("todo item %q has invalid priority %q (must be high, medium, or low)", item.ID, item.Priority)
+		if _, exists := updates[item.Content]; exists {
+			return ToolResult{}, fmt.Errorf("duplicate todo item content %q in a single update", item.Content)
 		}
+		updates[item.Content] = TodoItem{Content: item.Content, Status: item.Status}
+		orderedUpdates = append(orderedUpdates, TodoItem{Content: item.Content, Status: item.Status})
 	}
 
-	// Check if all todos are completed
-	allCompleted := len(params.Todos) > 0
+	existing := t.Store.Get()
+	merged := make([]TodoItem, 0, len(existing)+len(orderedUpdates))
+	seenExisting := make(map[string]bool, len(existing))
+
+	for _, item := range existing {
+		update, ok := updates[item.Content]
+		if !ok {
+			merged = append(merged, item)
+			continue
+		}
+		seenExisting[item.Content] = true
+		if update.Status == "cancelled" {
+			continue
+		}
+		merged = append(merged, TodoItem{Content: item.Content, Status: update.Status})
+	}
+
+	for _, item := range orderedUpdates {
+		if seenExisting[item.Content] || item.Status == "cancelled" {
+			continue
+		}
+		merged = append(merged, TodoItem{Content: item.Content, Status: item.Status})
+	}
+
+	inProgress := 0
 	completed := 0
-	for _, item := range params.Todos {
+	for _, item := range merged {
+		if item.Status == "in_progress" {
+			inProgress++
+		}
 		if item.Status == "completed" {
 			completed++
-		} else {
-			allCompleted = false
 		}
 	}
+	if inProgress > 1 {
+		return ToolResult{}, fmt.Errorf("todo list has %d items in_progress; keep exactly one item in_progress at a time", inProgress)
+	}
 
-	// If all completed, clear the list
-	if allCompleted {
+	if len(merged) == 0 {
+		t.Store.Clear()
+		eventsCh <- internal.Event{
+			Name:        t.Name(),
+			Message:     "Todo list cleared",
+			Preview:     []string{"No todos remaining."},
+			PreviewType: internal.PreviewPlain,
+		}
+		return ToolResult{Content: "Todo list updated. No todos remaining."}, nil
+	}
+
+	if completed == len(merged) {
 		t.Store.Clear()
 		eventsCh <- internal.Event{
 			Name:        t.Name(),
@@ -207,9 +235,9 @@ func (t *TodoWriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.
 		return ToolResult{Content: "All todos completed. List cleared."}, nil
 	}
 
-	t.Store.Set(params.Todos)
+	t.Store.Set(merged)
 
-	lines := formatTodos(params.Todos)
+	lines := formatTodos(merged)
 	preview := lines
 	if len(preview) > 6 {
 		preview = append(lines[:6], fmt.Sprintf("... and %d more", len(lines)-6))
@@ -217,13 +245,13 @@ func (t *TodoWriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.
 
 	eventsCh <- internal.Event{
 		Name:        t.Name(),
-		Message:     fmt.Sprintf("%d/%d completed", completed, len(params.Todos)),
+		Message:     fmt.Sprintf("%d/%d completed", completed, len(merged)),
 		Preview:     preview,
 		PreviewType: internal.PreviewPlain,
 	}
 
 	return ToolResult{
-		Content: fmt.Sprintf("Todo list updated (%d items, %d completed)", len(params.Todos), completed),
+		Content: fmt.Sprintf("Todo list updated (%d total, %d completed, %d changes applied)", len(merged), completed, len(params.Todos)),
 	}, nil
 }
 
@@ -241,8 +269,8 @@ func (t *TodoReadTool) Name() string { return "TodoRead" }
 func (t *TodoReadTool) Description() string {
 	return `Read the current todo list for this session.
 
-Returns the full list of todos as JSON, or "No todos" if none exist.
-Use this to check current progress before resuming work.`
+Returns the full list of active and completed todos as JSON, or "No todos" if none exist.
+Use this to review current progress before resuming work or before finishing.`
 }
 
 func (t *TodoReadTool) ParametersSchema() map[string]any {
