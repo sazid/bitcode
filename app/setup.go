@@ -68,7 +68,7 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 
 	mgr.Register(reminder.Reminder{
 		ID:      "conversation-length",
-		Content: "The conversation is getting long. Use the Compact tool to summarize the conversation and free up context space. Include all important context in your summary so you can continue working effectively. If the current task is already complete, suggest starting a new conversation with /new instead.",
+		Content: "Context quality drops as the conversation gets longer. If the task still needs more work, use Compact proactively before the context window gets crowded. Preserve the key requirements, files examined, decisions made, open todos, and the next verification steps in the summary. If the task is already done, suggest starting a fresh conversation with /new instead of continuing to accumulate history.",
 		Schedule: reminder.Schedule{
 			Kind:     reminder.ScheduleCondition,
 			MaxFires: 2,
@@ -83,13 +83,37 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 
 	mgr.Register(reminder.Reminder{
 		ID:      "core-behavior",
-		Content: "Remember: Read files before editing. Don't over-engineer — only change what was asked. Restate the user's intent before starting work. Keep responses brief with progress updates.",
+		Content: "Remember the operating procedure: understand the task, explore before editing, plan when the work is non-trivial, implement only what was asked, verify changes before declaring success, keep todos updated for multi-step work, and use Compact proactively when context quality starts dropping.",
 		Schedule: reminder.Schedule{
 			Kind:         reminder.ScheduleTurn,
 			TurnInterval: 17,
 		},
 		Source:   "builtin",
 		Priority: 1,
+		Active:   true,
+	})
+
+	mgr.Register(reminder.Reminder{
+		ID:      "verification-gate",
+		Content: "If you made code or configuration changes, do not declare the task complete until you have run the best available verification step and checked the result. If verification is unavailable, state exactly what you inspected manually and what remains unverified.",
+		Schedule: reminder.Schedule{
+			Kind:         reminder.ScheduleTurn,
+			TurnInterval: 19,
+		},
+		Source:   "builtin",
+		Priority: 2,
+		Active:   true,
+	})
+
+	mgr.Register(reminder.Reminder{
+		ID:      "todo-discipline",
+		Content: "For multi-step work, keep TodoWrite current: create actionable items, keep one item in_progress, complete items immediately after implementation plus verification, and add new work as soon as you discover it.",
+		Schedule: reminder.Schedule{
+			Kind:         reminder.ScheduleTurn,
+			TurnInterval: 13,
+		},
+		Source:   "builtin",
+		Priority: 2,
 		Active:   true,
 	})
 
