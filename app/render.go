@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
-	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,58 +13,7 @@ import (
 	"github.com/sazid/bitcode/internal/tools"
 )
 
-var spinnerMessages = []string{
-	"Thinking…",
-	"Pondering…",
-	"Reasoning…",
-	"Cogitating…",
-	"Ruminating…",
-	"Contemplating…",
-	"Brainstorming…",
-	"Tokenizing…",
-	"Crunching…",
-	"Compiling…",
-	"Parsing…",
-	"Decoding…",
-	"Diffing…",
-	"Rebasing…",
-	"Merging…",
-	"Unwrapping…",
-	"Dereferencing…",
-	"Allocating…",
-	"Defragmenting…",
-	"Reticulating…",
-	"Untangling…",
-	"Refactoring…",
-	"Brewing…",
-	"Distilling…",
-	"Fermenting…",
-	"Marinating…",
-	"Simmering…",
-	"Whisking…",
-	"Purring…",
-	"Napping…",
-	"Judging…",
-	"Calibrating…",
-	"Overclocking…",
-	"Downloading…",
-	"Consulting…",
-	"Summoning…",
-	"Manifesting…",
-	"Speedrunning…",
-	"Buffering…",
-	"Hallucinating…",
-	"Daydreaming…",
-	"Scheming…",
-	"Plotting…",
-	"Conjuring…",
-	"Synthesizing…",
-	"Percolating…",
-	"Meditating…",
-	"Vibing…",
-	"Yearning…",
-	"Spiraling…",
-}
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // renderMarkdown renders markdown text for terminal output using glamour.
 func renderMarkdown(w io.Writer, t *Theme, text string) {
@@ -75,39 +25,30 @@ func renderMarkdown(w io.Writer, t *Theme, text string) {
 	fmt.Fprint(w, strings.TrimRight(rendered, "\n")+"\n")
 }
 
-// Spinner shows a binary digits animation while the LLM is thinking.
+// Spinner shows a simple last-line animation while the agent is working.
 type Spinner struct {
 	w    io.Writer
 	stop chan struct{}
 	done chan struct{}
 }
 
-// randomBinary returns a string of n random '0' and '1' characters.
-func randomBinary(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = '0' + byte(rand.Intn(2))
-	}
-	return string(b)
-}
-
-func StartSpinner(w io.Writer, t *Theme, todos []tools.TodoItem) *Spinner {
+func StartSpinner(w io.Writer, t *Theme) *Spinner {
 	s := &Spinner{w: w, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(s.done)
 		ticker := time.NewTicker(80 * time.Millisecond)
 		defer ticker.Stop()
 
-		_ = todos
-
+		frame := 0
 		for {
 			select {
 			case <-s.stop:
 				fmt.Fprintf(w, "\r\033[K")
 				return
 			case <-ticker.C:
-				bits := randomBinary(6)
-				fmt.Fprintf(w, "\r\033[K  %s%s%s %sWorking…%s", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())
+				glyph := spinnerFrames[frame%len(spinnerFrames)]
+				frame++
+				fmt.Fprintf(w, "\r\033[K  %s%s%s %sWorking…%s", t.ANSI(t.Primary), glyph, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())
 			}
 		}
 	}()
@@ -119,66 +60,195 @@ func (s *Spinner) Stop() {
 	<-s.done
 }
 
-// coloredBullet returns a bullet in green (success) or red (error).
-func coloredBullet(t *Theme, isError bool) string {
+// eventBullet returns a bullet in the primary color, or red for errors.
+func eventBullet(t *Theme, isError bool) string {
 	if isError {
-		return t.ANSI(t.Error) + "⏺" + t.ANSIReset()
+		return t.ANSI(t.Error) + "●" + t.ANSIReset()
 	}
-	return t.ANSI(t.Success) + "⏺" + t.ANSIReset()
+	return t.ANSI(t.Primary) + "●" + t.ANSIReset()
 }
 
 func renderEvent(w io.Writer, t *Theme, e internal.Event) {
+	switch e.Name {
+	case "TodoWrite":
+		renderTodoEvent(w, t, e, "Update Todos")
+		return
+	case "TodoRead":
+		renderTodoEvent(w, t, e, "Read Todos")
+		return
+	case "Bash", "PowerShell":
+		renderShellEvent(w, t, e)
+		return
+	case "Read", "Edit", "Write":
+		renderFileEvent(w, t, e)
+		return
+	}
+
 	if e.PreviewType == internal.PreviewGuard {
 		renderGuardEvent(w, t, e)
 		return
 	}
 	if e.PreviewType == internal.PreviewBash {
-		renderBashEvent(w, t, e)
+		renderShellEvent(w, t, e)
 		return
 	}
 
-	args := strings.Join(e.Args, ", ")
-	if len(args) > 0 {
-		args = fmt.Sprintf("(%s)", args)
+	title := e.Name
+	if args := strings.TrimSpace(strings.Join(e.Args, " ")); args != "" {
+		title = fmt.Sprintf("%s %s", title, args)
 	}
-	fmt.Fprintf(w, "\n%s %s%s\n", coloredBullet(t, e.IsError), e.Name, args)
-	fmt.Fprintf(w, "⎿  %s\n", e.Message)
-
-	for _, line := range e.Preview {
-		fmt.Fprintf(w, "   %s\n", renderPreviewLine(t, e.PreviewType, line))
+	renderEventHeader(w, t, e, title)
+	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
+	if shouldRenderEventMessage(e) {
+		lines = append([]string{e.Message}, lines...)
 	}
+	renderEventLines(w, lines...)
 }
 
 func renderGuardEvent(w io.Writer, t *Theme, e internal.Event) {
-	tool := ""
-	if len(e.Args) > 0 {
-		tool = e.Args[0]
+	tool := firstArg(e.Args)
+	title := "Guard"
+	if tool != "" {
+		title = fmt.Sprintf("Guard %s", tool)
 	}
-	fmt.Fprintf(w, "\n%s⏺ Guard(%s)%s\n", t.ANSI(t.Warning), tool, t.ANSIReset())
-	fmt.Fprintf(w, "⎿  %s%s%s\n", t.ANSI(t.Warning), e.Message, t.ANSIReset())
+	renderEventHeader(w, t, e, title)
+	renderEventLines(w, t.ANSI(t.Warning)+e.Message+t.ANSIReset())
 }
 
-func renderBashEvent(w io.Writer, t *Theme, e internal.Event) {
-	description := ""
+func renderShellEvent(w io.Writer, t *Theme, e internal.Event) {
 	command := ""
-	if len(e.Args) > 0 {
-		description = e.Args[0]
-	}
 	if len(e.Args) > 1 {
 		command = e.Args[1]
 	}
-
-	if description != "" {
-		fmt.Fprintf(w, "\n%s %s(%s)\n", coloredBullet(t, e.IsError), e.Name, description)
-	} else {
-		fmt.Fprintf(w, "\n%s %s\n", coloredBullet(t, e.IsError), e.Name)
+	shellPath := tools.GetShellInfo().Path
+	title := fmt.Sprintf("Execute [%s]", shellPath)
+	if command != "" {
+		title = fmt.Sprintf("%s %s", title, command)
 	}
-	fmt.Fprintf(w, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
-	fmt.Fprintf(w, "⎿  %s\n", e.Message)
+	renderEventHeader(w, t, e, title)
+	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
+	if e.IsError && e.Message != "" {
+		lines = append([]string{t.ANSI(t.Error) + e.Message + t.ANSIReset()}, lines...)
+	} else if len(lines) == 0 && shouldRenderEventMessage(e) {
+		lines = append(lines, e.Message)
+	}
+	renderEventLines(w, lines...)
+}
 
+func renderFileEvent(w io.Writer, t *Theme, e internal.Event) {
+	target := displayPath(firstArg(e.Args))
+	title := e.Name
+	if target != "" {
+		title = fmt.Sprintf("%s %s", e.Name, target)
+	}
+	renderEventHeader(w, t, e, title)
+	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
+	if len(lines) == 0 && shouldRenderEventMessage(e) {
+		lines = append(lines, e.Message)
+	}
+	renderEventLines(w, lines...)
+}
+
+func renderTodoEvent(w io.Writer, t *Theme, e internal.Event, action string) {
+	title := action
+	if count := firstArg(e.Args); count != "" {
+		title = fmt.Sprintf("%s %s", action, count)
+	} else if count := countTodoPreviewItems(e.Preview); count > 0 {
+		title = fmt.Sprintf("%s %d item(s)", action, count)
+	}
+	renderEventHeader(w, t, e, title)
+	lines := make([]string, 0, len(e.Preview))
 	for _, line := range e.Preview {
-		fmt.Fprintf(w, "   %s\n", renderPreviewLine(t, e.PreviewType, line))
+		lines = append(lines, renderTodoPreviewLine(t, line))
 	}
+	if len(lines) == 0 && e.Message != "" {
+		lines = append(lines, e.Message)
+	}
+	renderEventLines(w, lines...)
+}
+
+func renderEventHeader(w io.Writer, t *Theme, e internal.Event, title string) {
+	timestamp := fmt.Sprintf("%s[%s]%s", t.ANSIDim(), time.Now().Format("15:04:05"), t.ANSIReset())
+	fmt.Fprintf(w, "\n%s %s %s\n", eventBullet(t, e.IsError), timestamp, title)
+}
+
+func renderEventLines(w io.Writer, lines ...string) {
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+}
+
+func formatPreviewLines(t *Theme, pt internal.PreviewType, lines []string) []string {
+	formatted := make([]string, 0, len(lines))
+	for _, line := range lines {
+		formatted = append(formatted, renderPreviewLine(t, pt, line))
+	}
+	return formatted
+}
+
+func renderTodoPreviewLine(t *Theme, line string) string {
+	switch {
+	case strings.HasPrefix(line, "[✓] "):
+		return fmt.Sprintf("%s󰄵%s %s", t.ANSI(t.Success), t.ANSIReset(), strings.TrimPrefix(line, "[✓] "))
+	case strings.HasPrefix(line, "[~] "):
+		return fmt.Sprintf("%s󰄗%s %s", t.ANSI(t.Primary), t.ANSIReset(), strings.TrimPrefix(line, "[~] "))
+	case strings.HasPrefix(line, "[ ] "):
+		return fmt.Sprintf("%s󰄌%s %s", t.ANSIDim(), t.ANSIReset(), strings.TrimPrefix(line, "[ ] "))
+	default:
+		return line
+	}
+}
+
+func countTodoPreviewItems(lines []string) int {
+	count := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "...") {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
+}
+
+func displayPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		if rel, relErr := filepath.Rel(cwd, path); relErr == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(path)
+}
+
+func shouldRenderEventMessage(e internal.Event) bool {
+	if strings.TrimSpace(e.Message) == "" {
+		return false
+	}
+	if (e.Name == "Bash" || e.Name == "PowerShell") && !e.IsError && strings.HasPrefix(e.Message, "Exit code: 0") {
+		return false
+	}
+	if e.Name == "Read" && strings.HasPrefix(e.Message, "Read ") && strings.HasSuffix(e.Message, " lines") {
+		return false
+	}
+	return true
 }
 
 func renderPreviewLine(t *Theme, pt internal.PreviewType, line string) string {

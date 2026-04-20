@@ -258,6 +258,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyCtrlC:
 			if m.state.Phase == sessionAgentRunning && m.runtime.agentCancel != nil {
 				m.runtime.agentCancel()
+				m.runtime.input.Reset()
 				return m, nil
 			}
 			if strings.TrimSpace(m.runtime.input.Value()) == "" {

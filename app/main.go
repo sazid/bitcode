@@ -155,7 +155,7 @@ func main() {
 		go func() { <-sigCh; cancel() }()
 
 		agentConfig.TaskTitle = prompt
-		result := runAgentLoop(ctx, agentConfig, &messages, toolDefs, singleShotCallbacks(themes, agentConfig.TodoStore, quiet))
+		result := runAgentLoop(ctx, agentConfig, &messages, toolDefs, singleShotCallbacks(themes, quiet))
 
 		if result != nil && result.Output != "" {
 			if quiet {
@@ -198,7 +198,7 @@ func toolDefsFromManager(m tools.ToolRegistry) []llm.ToolDef {
 	return defs
 }
 
-func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore, quiet bool) AgentCallbacks {
+func singleShotCallbacks(themes *ThemeRegistry, quiet bool) AgentCallbacks {
 	var spin *Spinner
 	return AgentCallbacks{
 		OnContent: func(content string) {
@@ -211,11 +211,7 @@ func singleShotCallbacks(themes *ThemeRegistry, todoStore tools.TodoStore, quiet
 				return
 			}
 			if active {
-				var todos []tools.TodoItem
-				if todoStore != nil {
-					todos = todoStore.Get()
-				}
-				spin = StartSpinner(os.Stderr, themes.Active(), todos)
+				spin = StartSpinner(os.Stderr, themes.Active())
 			} else if spin != nil {
 				spin.Stop()
 				spin = nil
@@ -251,7 +247,7 @@ func runSingleShot(config *AgentConfig, themes *ThemeRegistry, prompt string, qu
 		cancel()
 	}()
 
-	result := runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(themes, config.TodoStore, quiet))
+	result := runAgentLoop(ctx, config, &messages, toolDefs, singleShotCallbacks(themes, quiet))
 
 	// Write the final assistant output to stdout after all stderr activity is done.
 	// This keeps it cleanly separated from tool events/spinners on stderr.
