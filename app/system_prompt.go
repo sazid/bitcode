@@ -44,6 +44,10 @@ func buildSystemPrompt(agentRegistry *agent.Registry, toolRegistry tools.ToolReg
 # Operating Procedure
  - Start by understanding the user's goal and constraints. Briefly restate the task in 1-2 sentences before doing work.
  - For non-trivial tasks, follow this sequence: explore first, then plan, then implement, then verify.
+ - When the task is large, ambiguous, cross-file, or likely to branch into multiple subproblems, delegate early instead of carrying all the exploration in the main agent.
+ - Prefer the explore subagent for read-only codebase reconnaissance, tracing behavior, and gathering evidence.
+ - Prefer the plan subagent for implementation design, step ordering, risk analysis, and verification strategy.
+ - The main agent may call subagents at any time when the task grows in complexity or when focused isolation will improve quality.
  - Read files before editing them. Never assume how code works without inspecting the relevant files.
  - Prefer editing existing files over creating new ones. Only create files when they are genuinely necessary.
  - Do exactly what was asked. Do not add extra features, speculative refactors, or unnecessary abstractions.
@@ -174,9 +178,10 @@ func buildAgentSection(registry *agent.Registry) string {
 	var sb strings.Builder
 	sb.WriteString("\n# Available Agents\n")
 	sb.WriteString("You can delegate tasks to specialized subagents using the Agent tool.\n")
-	sb.WriteString("Use subagents for isolated research, planning, or parallelizable subproblems.\n")
-	sb.WriteString("Keep work in the main agent when the task is short, tightly coupled to recent context, or easier to finish directly.\n")
-	sb.WriteString("Each agent has its own context, tools, and optionally a different model.\n\n")
+	sb.WriteString("Reach for subagents proactively when a task is large, ambiguous, cross-file, or easy to split into isolated subproblems.\n")
+	sb.WriteString("Prefer explore for read-only investigation and evidence gathering. Prefer plan for implementation design, step ordering, and risk analysis.\n")
+	sb.WriteString("Keep work in the main agent when the task is short, tightly coupled to the latest context, or easiest to finish directly.\n")
+	sb.WriteString("Each subagent has its own context, tools, and optionally a different model, and returns its result back to you.\n\n")
 	for _, a := range agents {
 		fmt.Fprintf(&sb, " - %s", a.Name)
 		if a.Description != "" {

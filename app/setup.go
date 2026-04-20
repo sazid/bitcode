@@ -83,13 +83,28 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 
 	mgr.Register(reminder.Reminder{
 		ID:      "core-behavior",
-		Content: "Remember the operating procedure: understand the task, explore before editing, plan when the work is non-trivial, implement only what was asked, verify changes before declaring success, keep todos updated for multi-step work, and use Compact proactively when context quality starts dropping.",
+		Content: "Remember the operating procedure: understand the task, explore before editing, plan when the work is non-trivial, delegate to explore or plan subagents early when the task is large, ambiguous, or cross-file, implement only what was asked, verify changes before declaring success, keep todos updated for multi-step work, and use Compact proactively when context quality starts dropping.",
 		Schedule: reminder.Schedule{
 			Kind:         reminder.ScheduleTurn,
 			TurnInterval: 17,
 		},
 		Source:   "builtin",
 		Priority: 1,
+		Active:   true,
+	})
+
+	mgr.Register(reminder.Reminder{
+		ID:      "subagent-delegation",
+		Content: "If the task is still growing in scope, spans multiple files, or needs isolated research before coding, consider delegating now: use the explore subagent for read-only codebase investigation and the plan subagent for implementation design and sequencing.",
+		Schedule: reminder.Schedule{
+			Kind:     reminder.ScheduleCondition,
+			MaxFires: 2,
+			Condition: func(state *reminder.ConversationState) bool {
+				return state.Turn >= 6 || len(state.RecentToolCallChains) >= 4
+			},
+		},
+		Source:   "builtin",
+		Priority: 2,
 		Active:   true,
 	})
 

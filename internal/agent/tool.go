@@ -43,7 +43,7 @@ func (t *AgentTool) Name() string { return "Agent" }
 
 func (t *AgentTool) Description() string {
 	var sb strings.Builder
-	sb.WriteString("Spawn a subagent to handle a task. The subagent runs autonomously with its own context and returns its final output.\n\nAvailable agent types:\n")
+	sb.WriteString("Spawn a specialized subagent to handle a bounded task. Use this when the work is complex, cross-file, ambiguous, or easy to isolate from the main thread. The subagent runs autonomously with its own context and returns its final output.\n\nAvailable agent types:\n")
 	for _, def := range t.Registry.List() {
 		fmt.Fprintf(&sb, "- %s: %s\n", def.Name, def.Description)
 	}
@@ -56,7 +56,7 @@ func (t *AgentTool) ParametersSchema() map[string]any {
 		"properties": map[string]any{
 			"agent_type": map[string]any{
 				"type":        "string",
-				"description": "Which agent type to use (e.g., 'explore', 'plan', 'general-purpose')",
+				"description": "Which agent type to use (for example: explore for read-only investigation, plan for implementation design, general-purpose for isolated execution)",
 			},
 			"prompt": map[string]any{
 				"type":        "string",

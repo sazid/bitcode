@@ -54,7 +54,7 @@ func TestIntegration_SubagentSpawn(t *testing.T) {
 		Description: "Fast explorer",
 		Prompt:      "You are an explorer.",
 		MaxTurns:    10,
-		Tools:       []string{"Read", "Grep"},
+		Tools:       []string{"Read", "Glob", "LineCount", "Bash"},
 	})
 
 	parentConfig := &Config{

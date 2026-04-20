@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -112,10 +113,22 @@ func TestBuiltinDefinitions(t *testing.T) {
 	if len(explore.Tools) != 4 {
 		t.Errorf("explore tools count = %d, want 4", len(explore.Tools))
 	}
+	if explore.Tools[2] != "LineCount" {
+		t.Errorf("explore tools = %v, expected LineCount to be included", explore.Tools)
+	}
+	if !strings.Contains(explore.Prompt, "read-only codebase reconnaissance") {
+		t.Errorf("explore prompt = %q, expected stronger explore guidance", explore.Prompt)
+	}
 
 	plan := byName["plan"]
 	if plan.MaxTurns != 50 {
 		t.Errorf("plan max_turns = %d, want 50", plan.MaxTurns)
+	}
+	if len(plan.Tools) != 5 {
+		t.Errorf("plan tools count = %d, want 5", len(plan.Tools))
+	}
+	if !strings.Contains(plan.Prompt, "design implementation plans before coding") {
+		t.Errorf("plan prompt = %q, expected stronger plan guidance", plan.Prompt)
 	}
 
 	gp := byName["general-purpose"]
