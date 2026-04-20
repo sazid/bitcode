@@ -145,8 +145,40 @@ func TestEditTool_EmitsEvent(t *testing.T) {
 	if !strings.HasPrefix(events[0].Preview[0], "--- ") || !strings.HasPrefix(events[0].Preview[1], "+++ ") {
 		t.Fatalf("expected unified diff headers, got %v", events[0].Preview[:2])
 	}
-	if events[0].Preview[2] != "@@" {
-		t.Fatalf("expected diff hunk marker, got %q", events[0].Preview[2])
+	if events[0].Preview[2] == "@@" {
+		t.Fatalf("expected unified diff range header, got %q", events[0].Preview[2])
+	}
+	if !strings.HasPrefix(events[0].Preview[2], "@@ -") {
+		t.Fatalf("expected unified diff range header, got %q", events[0].Preview[2])
+	}
+	if len(events[0].Preview) < 5 || events[0].Preview[3] != "-abc" || events[0].Preview[4] != "+xyz" {
+		t.Fatalf("expected inline file diff lines, got %v", events[0].Preview)
+	}
+}
+
+func TestEditTool_PreviewUsesFullChangedLines(t *testing.T) {
+	filePath := writeTempFile(t, "hello world\n")
+	raw, _ := json.Marshal(EditInput{FilePath: filePath, OldString: "world", NewString: "Go"})
+	tool := &EditTool{}
+	ch := make(chan internal.Event, 10)
+	_, err := tool.Execute(raw, ch)
+	close(ch)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var event internal.Event
+	for e := range ch {
+		event = e
+	}
+	if len(event.Preview) < 5 {
+		t.Fatalf("expected preview lines, got %v", event.Preview)
+	}
+	if event.Preview[3] != "-hello world" {
+		t.Fatalf("expected removed full line, got %q", event.Preview[3])
+	}
+	if event.Preview[4] != "+hello Go" {
+		t.Fatalf("expected added full line, got %q", event.Preview[4])
 	}
 }
 

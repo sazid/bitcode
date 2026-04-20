@@ -116,7 +116,7 @@ func (e *EditTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 		return ToolResult{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	previewLines := buildDiffPreview(previewPathForDiff(wd, cleanPath), params.OldString, params.NewString, 6)
+	previewLines := buildDiffPreview(previewPathForDiff(wd, cleanPath), original, updated, 8)
 	msg := fmt.Sprintf("Replaced %d occurrence(s)", replacements)
 
 	eventsCh <- internal.Event{
@@ -132,29 +132,100 @@ func (e *EditTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 	}, nil
 }
 
-func buildDiffPreview(displayPath, oldContent, newContent string, maxPreview int) []string {
+func buildDiffPreview(displayPath, beforeContent, afterContent string, maxChangedLines int) []string {
+	beforeLines := previewContentLines(beforeContent)
+	afterLines := previewContentLines(afterContent)
+
+	prefix := 0
+	for prefix < len(beforeLines) && prefix < len(afterLines) && beforeLines[prefix] == afterLines[prefix] {
+		prefix++
+	}
+
+	beforeSuffix := len(beforeLines) - 1
+	afterSuffix := len(afterLines) - 1
+	for beforeSuffix >= prefix && afterSuffix >= prefix && beforeLines[beforeSuffix] == afterLines[afterSuffix] {
+		beforeSuffix--
+		afterSuffix--
+	}
+
+	const contextLines = 2
+	beforeContextStart := maxInt(0, prefix-contextLines)
+	afterContextStart := maxInt(0, prefix-contextLines)
+	beforeContextEnd := minInt(len(beforeLines), beforeSuffix+1+contextLines)
+	afterContextEnd := minInt(len(afterLines), afterSuffix+1+contextLines)
+
+	oldCount := beforeContextEnd - beforeContextStart
+	newCount := afterContextEnd - afterContextStart
+	oldStart := hunkStartLine(beforeContextStart, oldCount)
+	newStart := hunkStartLine(afterContextStart, newCount)
+
 	previewLines := []string{
 		fmt.Sprintf("--- %s", filepath.ToSlash(displayPath)),
 		fmt.Sprintf("+++ %s", filepath.ToSlash(displayPath)),
-		"@@",
+		fmt.Sprintf("@@ -%s +%s @@", formatHunkRange(oldStart, oldCount), formatHunkRange(newStart, newCount)),
 	}
 
-	for i, line := range previewContentLines(oldContent) {
-		if i >= maxPreview {
-			previewLines = append(previewLines, "...")
-			break
-		}
-		previewLines = append(previewLines, "-"+line)
+	for _, line := range beforeLines[beforeContextStart:prefix] {
+		previewLines = append(previewLines, " "+line)
 	}
-	for i, line := range previewContentLines(newContent) {
-		if i >= maxPreview {
-			previewLines = append(previewLines, "...")
-			break
-		}
-		previewLines = append(previewLines, "+"+line)
+	previewLines = append(previewLines, truncatedDiffLines(beforeLines[prefix:beforeSuffix+1], "-", maxChangedLines)...)
+	previewLines = append(previewLines, truncatedDiffLines(afterLines[prefix:afterSuffix+1], "+", maxChangedLines)...)
+	for _, line := range afterLines[afterSuffix+1 : afterContextEnd] {
+		previewLines = append(previewLines, " "+line)
 	}
 
 	return previewLines
+}
+
+func truncatedDiffLines(lines []string, prefix string, maxChangedLines int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	if maxChangedLines <= 0 || len(lines) <= maxChangedLines {
+		out := make([]string, 0, len(lines))
+		for _, line := range lines {
+			out = append(out, prefix+line)
+		}
+		return out
+	}
+
+	out := make([]string, 0, maxChangedLines+1)
+	for _, line := range lines[:maxChangedLines] {
+		out = append(out, prefix+line)
+	}
+	out = append(out, "...")
+	return out
+}
+
+func formatHunkRange(start, count int) string {
+	if count == 1 {
+		return fmt.Sprintf("%d", start)
+	}
+	return fmt.Sprintf("%d,%d", start, count)
+}
+
+func hunkStartLine(startIndex, count int) int {
+	if count == 0 {
+		if startIndex == 0 {
+			return 0
+		}
+		return startIndex
+	}
+	return startIndex + 1
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func previewContentLines(content string) []string {

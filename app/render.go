@@ -140,6 +140,8 @@ func renderFileEvent(w io.Writer, t *Theme, e internal.Event) {
 	title := e.Name
 	if e.Name == "Read" {
 		title = buildReadTitle(target, readRangeArg(e.Args))
+	} else if e.Name == "Edit" && target != "" {
+		title = fmt.Sprintf("Update %s", target)
 	} else if target != "" {
 		title = fmt.Sprintf("%s %s", e.Name, target)
 	}
@@ -274,6 +276,9 @@ func shouldRenderEventMessage(e internal.Event) bool {
 		return false
 	}
 	if e.Name == "Read" && strings.HasPrefix(e.Message, "Read ") && strings.HasSuffix(e.Message, " lines") {
+		return false
+	}
+	if e.Name == "Edit" && e.PreviewType == internal.PreviewDiff && strings.HasPrefix(e.Message, "Replaced ") {
 		return false
 	}
 	return true

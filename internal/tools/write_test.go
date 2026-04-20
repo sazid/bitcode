@@ -142,8 +142,8 @@ func TestWriteTool_EmitsEvent(t *testing.T) {
 	if !strings.HasPrefix(events[0].Preview[0], "--- ") || !strings.HasPrefix(events[0].Preview[1], "+++ ") {
 		t.Fatalf("expected unified diff headers, got %v", events[0].Preview[:2])
 	}
-	if events[0].Preview[2] != "@@" {
-		t.Fatalf("expected diff hunk marker, got %q", events[0].Preview[2])
+	if !strings.HasPrefix(events[0].Preview[2], "@@ -") {
+		t.Fatalf("expected unified diff range header, got %q", events[0].Preview[2])
 	}
 	if !strings.HasPrefix(events[0].Preview[3], "+") {
 		t.Fatalf("expected added line in diff preview, got %q", events[0].Preview[3])
