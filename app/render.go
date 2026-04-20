@@ -203,11 +203,11 @@ func formatPreviewLines(t *Theme, pt internal.PreviewType, lines []string) []str
 func renderTodoPreviewLine(t *Theme, line string) string {
 	switch {
 	case strings.HasPrefix(line, "[✓] "):
-		return fmt.Sprintf("%s󰄵%s %s", t.ANSI(t.Success), t.ANSIReset(), strings.TrimPrefix(line, "[✓] "))
+		return t.ANSI(t.Success) + line + t.ANSIReset()
 	case strings.HasPrefix(line, "[~] "):
-		return fmt.Sprintf("%s󰄗%s %s", t.ANSI(t.Primary), t.ANSIReset(), strings.TrimPrefix(line, "[~] "))
+		return t.ANSI(t.Primary) + line + t.ANSIReset()
 	case strings.HasPrefix(line, "[ ] "):
-		return fmt.Sprintf("%s󰄌%s %s", t.ANSI(t.Secondary), t.ANSIReset(), strings.TrimPrefix(line, "[ ] "))
+		return t.ANSI(t.Secondary) + line + t.ANSIReset()
 	default:
 		return t.ANSI(t.Primary) + line + t.ANSIReset()
 	}
