@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -269,8 +271,14 @@ func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo str
 
 	slashCommands := buildSlashCommands(config)
 	submitCh := make(chan InputResult, 1)
+	status := sessionStatus{
+		Project:   currentProjectName(),
+		Branch:    currentGitBranch(),
+		Model:     config.Model,
+		Reasoning: config.Reasoning,
+	}
 
-	model := newSessionModel(config, themes, slashCommands, submitCh)
+	model := newSessionModel(config, themes, slashCommands, submitCh, status)
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 	// Set up interactive permission handler (needs the tea.Program reference)
@@ -304,6 +312,28 @@ func runInteractive(config *AgentConfig, themes *ThemeRegistry, providerInfo str
 //	BITCODE_BASE_URL   — API endpoint (default: auto-detected from provider)
 //	BITCODE_PROVIDER   — backend: "openai-chat", "openai-responses", "anthropic" (default: auto-detect from model)
 //	BITCODE_WEBSOCKET  — "true" to use WebSocket transport for openai-responses
+func currentProjectName() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return filepath.Base(wd)
+}
+
+func currentGitBranch() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = wd
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func resolveProviderConfig() llm.ProviderConfig {
 	cfg := llm.ProviderConfig{
 		Backend:      os.Getenv("BITCODE_PROVIDER"),

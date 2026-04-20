@@ -98,6 +98,7 @@ type SessionState struct {
 	Quitting      bool            `json:"quitting"`
 	TaskID        string          `json:"task_id"`
 	TurnCount     int             `json:"turn_count"`
+	Status        sessionStatus   `json:"status,omitempty"`
 }
 
 // SessionRuntime holds channels, widgets, and handles that cannot be serialized.
@@ -112,6 +113,13 @@ type SessionRuntime struct {
 	agentStartedAt time.Time
 }
 
+type sessionStatus struct {
+	Project   string `json:"project,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
 // --- Session model ---
 
 type sessionModel struct {
@@ -119,10 +127,10 @@ type sessionModel struct {
 	runtime SessionRuntime
 }
 
-func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []SlashCommand, submitCh chan InputResult) sessionModel {
+func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []SlashCommand, submitCh chan InputResult, status sessionStatus) sessionModel {
 	input := textinput.New()
 	input.Placeholder = "Ask BitCode"
-	input.Prompt = "❯ "
+	input.Prompt = "> "
 	input.CharLimit = 0
 	input.Focus()
 
@@ -136,6 +144,7 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 			Phase:    sessionIdle,
 			Commands: commands,
 			TaskID:   GenerateTaskID(),
+			Status:   status,
 		},
 		runtime: SessionRuntime{
 			input:    input,
@@ -342,17 +351,59 @@ func (m sessionModel) View() string {
 		if !m.runtime.agentStartedAt.IsZero() {
 			elapsed = fmt.Sprintf(" %s(%s)%s", t.ANSIDim(), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset())
 		}
-		fmt.Fprintf(&sb, "  %s%s Working…%s%s",
-			t.ANSIDim(), frame,
-			t.ANSIReset(),
+		fmt.Fprintf(&sb, "  %s%s%s %sWorking…%s%s\n",
+			t.ANSIDim(), frame, t.ANSIReset(),
+			t.ANSIDim(), t.ANSIReset(),
 			elapsed,
 		)
+		fmt.Fprint(&sb, m.renderStatusLine(true))
 		return sb.String()
 	}
 
-	fmt.Fprintf(&sb, "\n%s\n", m.runtime.input.View())
-	fmt.Fprintf(&sb, "%s  Enter send · Esc clear · Ctrl+C interrupt/exit · Ctrl+D exit%s", t.ANSIDim(), t.ANSIReset())
+	fmt.Fprintf(&sb, "%s\n", m.runtime.input.View())
+	fmt.Fprint(&sb, m.renderStatusLine(false))
 	return sb.String()
+}
+
+func (m sessionModel) renderStatusLine(running bool) string {
+	t := m.runtime.themes.Active()
+	sep := fmt.Sprintf("%s · %s", t.ANSIDim(), t.ANSIReset())
+
+	segments := make([]string, 0, 8)
+	if project := strings.TrimSpace(m.state.Status.Project); project != "" {
+		segments = append(segments, t.ANSI(t.Primary)+compactStatusLabel(project, 18)+t.ANSIReset())
+	}
+	if branch := strings.TrimSpace(m.state.Status.Branch); branch != "" {
+		segments = append(segments, t.ANSI(t.Secondary)+compactStatusLabel(branch, 18)+t.ANSIReset())
+	}
+	if model := strings.TrimSpace(m.state.Status.Model); model != "" {
+		segments = append(segments, t.ANSIDim()+compactStatusLabel(model, 28)+t.ANSIReset())
+	}
+	if reasoning := strings.TrimSpace(m.state.Status.Reasoning); reasoning != "" {
+		segments = append(segments, t.ANSIDim()+"reasoning:"+compactStatusLabel(reasoning, 12)+t.ANSIReset())
+	}
+	if running {
+		segments = append(segments, t.ANSIDim()+"Ctrl+C interrupt"+t.ANSIReset())
+	} else {
+		segments = append(segments,
+			t.ANSIDim()+"Enter send"+t.ANSIReset(),
+			t.ANSIDim()+"Esc clear"+t.ANSIReset(),
+			t.ANSIDim()+"Ctrl+D exit"+t.ANSIReset(),
+		)
+	}
+
+	return "  " + strings.Join(segments, sep)
+}
+
+func compactStatusLabel(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	if max <= 1 {
+		return value[:max]
+	}
+	return value[:max-1] + "…"
 }
 
 func (m sessionModel) renderPermissionPrompt() string {
@@ -469,7 +520,7 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, themes *ThemeRegistry,
 
 			ut := themes.Active()
 			userMsgStyle := lipgloss.NewStyle().Foreground(ut.Info)
-			p.Send(appendOutputMsg("\n" + userMsgStyle.Render("› "+text)))
+			p.Send(appendOutputMsg("\n" + userMsgStyle.Render("> "+text)))
 
 			if lifecycle.IsRunning() {
 				p.Send(appendOutputMsg(dimStyle().Render("  queued for agent")))
