@@ -33,8 +33,8 @@ type inputKeyMap struct {
 
 var inputKeys = inputKeyMap{
 	Submit: key.NewBinding(
-		key.WithKeys("ctrl+s"),
-		key.WithHelp("ctrl+s", "submit"),
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "submit"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("ctrl+d"),
@@ -113,8 +113,7 @@ func printHelp(w io.Writer, t *Theme, skillMgr skills.SkillProvider) {
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, headerStyle.Render("  Keys"))
-	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Ctrl+S"), descStyle.Render("Submit input / send message to agent"))
-	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Enter"), descStyle.Render("New line"))
+	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Enter"), descStyle.Render("Submit input / send message to agent"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Escape"), descStyle.Render("Clear input"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Ctrl+C"), descStyle.Render("Interrupt agent / clear input / exit"))
 	fmt.Fprintf(w, "  %s %s\n", cmdStyle.Render("Ctrl+D"), descStyle.Render("Exit"))

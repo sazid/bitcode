@@ -4,14 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -35,6 +32,8 @@ type permRequestMsg struct {
 	responseCh chan guard.PermissionResult
 }
 type newConversationMsg struct{ taskID string }
+
+var tuiSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // --- outputExec implements tea.ExecCommand to write text with the renderer fully stopped ---
 
@@ -98,27 +97,21 @@ type SessionState struct {
 	Phase         sessionState    `json:"phase"`
 	SpinnerActive bool            `json:"spinner_active"`
 	SpinnerFrame  int             `json:"spinner_frame"`
-	SpinnerMsg    string          `json:"spinner_msg"`
-	SpinnerAnim   int             `json:"spinner_anim"`
 	OutputQueue   []string        `json:"output_queue,omitempty"`
 	Commands      []SlashCommand  `json:"commands"`
-	Suggestions   []SlashCommand  `json:"suggestions,omitempty"`
-	ShowSuggest   bool            `json:"show_suggest"`
-	SuggestIdx    int             `json:"suggest_idx"`
 	PermToolName  string          `json:"perm_tool_name,omitempty"`
 	PermDecision  *guard.Decision `json:"perm_decision,omitempty"`
 	PermPhase     permPromptState `json:"perm_phase"`
 	Width         int             `json:"width"`
 	Height        int             `json:"height"`
 	Quitting      bool            `json:"quitting"`
-	TextContent   string          `json:"text_content"`
 	TaskID        string          `json:"task_id"`
 	TurnCount     int             `json:"turn_count"`
 }
 
 // SessionRuntime holds channels, widgets, and handles that cannot be serialized.
 type SessionRuntime struct {
-	textarea       textarea.Model
+	input          textinput.Model
 	permFeedback   textinput.Model
 	submitCh       chan InputResult
 	permRespCh     chan guard.PermissionResult
@@ -138,43 +131,30 @@ type sessionModel struct {
 }
 
 func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []SlashCommand, submitCh chan InputResult) sessionModel {
-	ta := textarea.New()
-	ta.Placeholder = "Ask anything... (Enter for newline, Ctrl+S to submit)"
-	ta.Prompt = "\u276f "
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0
-	ta.SetHeight(2)
-	ta.MaxHeight = 20
-	ta.SetPromptFunc(2, func(lineIdx int) string {
-		if lineIdx == 0 {
-			return "\u276f "
-		}
-		return "  "
-	})
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Base = lipgloss.NewStyle()
-	ta.BlurredStyle.Base = lipgloss.NewStyle()
-	t := themes.Active()
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(t.Dim)
-	ta.FocusedStyle.Text = lipgloss.NewStyle()
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(t.Secondary)
-	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(t.Dim)
-	ta.Focus()
+	input := textinput.New()
+	input.Placeholder = "Ask BitCode"
+	input.Prompt = "❯ "
+	input.CharLimit = 0
+	input.Focus()
 
-	ti := textinput.New()
-	ti.Placeholder = "Type your instructions for the agent..."
-	ti.CharLimit = 500
+	t := themes.Active()
+	input.PlaceholderStyle = lipgloss.NewStyle().Foreground(t.Dim)
+	input.TextStyle = lipgloss.NewStyle()
+	input.PromptStyle = lipgloss.NewStyle().Foreground(t.Primary)
+
+	feedback := textinput.New()
+	feedback.Placeholder = "Tell the agent what to do"
+	feedback.CharLimit = 500
 
 	return sessionModel{
 		state: SessionState{
-			Phase:      sessionIdle,
-			SpinnerMsg: spinnerMessages[rand.Intn(len(spinnerMessages))],
-			Commands:   commands,
-			TaskID:     GenerateTaskID(),
+			Phase:    sessionIdle,
+			Commands: commands,
+			TaskID:   GenerateTaskID(),
 		},
 		runtime: SessionRuntime{
-			textarea:     ta,
-			permFeedback: ti,
+			input:        input,
+			permFeedback: feedback,
 			submitCh:     submitCh,
 			todoStore:    config.TodoStore,
 			themes:       themes,
@@ -183,7 +163,7 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 }
 
 func (m sessionModel) Init() tea.Cmd {
-	return textarea.Blink
+	return textinput.Blink
 }
 
 // viewHeight returns how many terminal lines the current View() occupies.
@@ -207,6 +187,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runtime.agentCancel = msg.cancel
 		m.state.Phase = sessionAgentRunning
 		m.runtime.agentStartedAt = time.Now()
+		m.runtime.input.Blur()
 		return m, nil
 
 	case agentThinkingMsg:
@@ -214,8 +195,6 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.active {
 			m.state.TurnCount++
 			m.state.SpinnerFrame = 0
-			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
-			m.state.SpinnerAnim = int(randomSpinnerAnim())
 			if !m.runtime.ticking {
 				m.runtime.ticking = true
 				return m, m.tickSpinner()
@@ -229,6 +208,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runtime.ticking = false
 		m.runtime.agentCancel = nil
 		m.runtime.agentStartedAt = time.Time{}
+		m.runtime.input.Focus()
 		return m, nil
 
 	case spinnerTickMsg:
@@ -237,10 +217,6 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.state.SpinnerFrame++
-		if m.state.SpinnerFrame%100 == 0 {
-			m.state.SpinnerMsg = spinnerMessages[rand.Intn(len(spinnerMessages))]
-			m.state.SpinnerAnim = int(randomSpinnerAnim())
-		}
 		return m, m.tickSpinner()
 
 	case appendOutputMsg:
@@ -269,7 +245,7 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.PermDecision = &msg.decision
 		m.runtime.permRespCh = msg.responseCh
 		m.state.PermPhase = permPromptChoosing
-		m.runtime.textarea.Blur()
+		m.runtime.input.Blur()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -279,15 +255,31 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			close(m.runtime.submitCh)
 			return m, tea.Quit
 
-		case key.Matches(msg, inputKeys.Submit): // ctrl+s
-			text := strings.TrimSpace(m.runtime.textarea.Value())
+		case msg.Type == tea.KeyCtrlC:
+			if m.state.Phase == sessionAgentRunning && m.runtime.agentCancel != nil {
+				m.runtime.agentCancel()
+				return m, nil
+			}
+			if strings.TrimSpace(m.runtime.input.Value()) == "" {
+				m.state.Quitting = true
+				close(m.runtime.submitCh)
+				return m, tea.Quit
+			}
+			m.runtime.input.Reset()
+			return m, nil
+		}
+
+		if m.state.Phase == sessionAgentRunning {
+			return m, nil
+		}
+
+		switch {
+		case key.Matches(msg, inputKeys.Submit):
+			text := strings.TrimSpace(m.runtime.input.Value())
 			if text == "" {
 				return m, nil
 			}
-			m.runtime.textarea.Reset()
-			m.runtime.textarea.SetHeight(2)
-			m.state.ShowSuggest = false
-			m.state.Suggestions = nil
+			m.runtime.input.Reset()
 
 			var result InputResult
 			if strings.HasPrefix(text, "/") {
@@ -301,74 +293,23 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case msg.Type == tea.KeyCtrlC:
-			if m.state.Phase == sessionAgentRunning && m.runtime.agentCancel != nil {
-				m.runtime.agentCancel()
-				return m, nil
-			}
-			if strings.TrimSpace(m.runtime.textarea.Value()) == "" {
-				m.state.Quitting = true
-				close(m.runtime.submitCh)
-				return m, tea.Quit
-			}
-			m.runtime.textarea.Reset()
-			m.runtime.textarea.SetHeight(2)
-			m.state.ShowSuggest = false
-			m.state.Suggestions = nil
-			return m, nil
-
 		case msg.Type == tea.KeyEscape:
-			if m.state.ShowSuggest {
-				m.state.ShowSuggest = false
-				m.state.Suggestions = nil
-				return m, nil
-			}
-			m.runtime.textarea.Reset()
-			m.runtime.textarea.SetHeight(2)
+			m.runtime.input.Reset()
 			return m, nil
-		}
-
-		// Autocomplete key handling
-		if m.state.ShowSuggest && len(m.state.Suggestions) > 0 {
-			switch msg.Type {
-			case tea.KeyUp:
-				m.state.SuggestIdx--
-				if m.state.SuggestIdx < 0 {
-					m.state.SuggestIdx = len(m.state.Suggestions) - 1
-				}
-				return m, nil
-			case tea.KeyDown:
-				m.state.SuggestIdx++
-				if m.state.SuggestIdx >= len(m.state.Suggestions) {
-					m.state.SuggestIdx = 0
-				}
-				return m, nil
-			case tea.KeyTab:
-				selected := m.state.Suggestions[m.state.SuggestIdx]
-				m.runtime.textarea.SetValue("/" + selected.Name)
-				m.runtime.textarea.CursorEnd()
-				m.state.ShowSuggest = false
-				m.state.Suggestions = nil
-				return m, nil
-			}
 		}
 
 	case tea.WindowSizeMsg:
 		m.state.Width = msg.Width
 		m.state.Height = msg.Height
-		m.runtime.textarea.SetWidth(msg.Width - 1)
-	}
-
-	// Pre-grow textarea before processing keystroke
-	m.resizeTextarea()
-	if h := m.runtime.textarea.Height(); h < 20 {
-		m.runtime.textarea.SetHeight(h + 1)
+		inputWidth := msg.Width - 4
+		if inputWidth < 20 {
+			inputWidth = 20
+		}
+		m.runtime.input.Width = inputWidth
 	}
 
 	var cmd tea.Cmd
-	m.runtime.textarea, cmd = m.runtime.textarea.Update(msg)
-	m.resizeTextarea()
-	m.updateSuggestions()
+	m.runtime.input, cmd = m.runtime.input.Update(msg)
 
 	return m, cmd
 }
@@ -382,7 +323,7 @@ func (m sessionModel) updatePermission(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.runtime.permRespCh <- guard.PermissionResult{Feedback: feedback}
 					m.runtime.permFeedback.Reset()
 					m.state.Phase = sessionAgentRunning
-					m.runtime.textarea.Focus()
+					m.runtime.input.Focus()
 					return m, nil
 				}
 				return m, nil
@@ -402,17 +343,17 @@ func (m sessionModel) updatePermission(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y":
 			m.runtime.permRespCh <- guard.PermissionResult{Approved: true, Cache: false}
 			m.state.Phase = sessionAgentRunning
-			m.runtime.textarea.Focus()
+			m.runtime.input.Focus()
 			return m, nil
 		case "a":
 			m.runtime.permRespCh <- guard.PermissionResult{Approved: true, Cache: true}
 			m.state.Phase = sessionAgentRunning
-			m.runtime.textarea.Focus()
+			m.runtime.input.Focus()
 			return m, nil
 		case "n":
 			m.runtime.permRespCh <- guard.PermissionResult{Approved: false}
 			m.state.Phase = sessionAgentRunning
-			m.runtime.textarea.Focus()
+			m.runtime.input.Focus()
 			return m, nil
 		case "t":
 			m.state.PermPhase = permPromptFeedback
@@ -430,74 +371,27 @@ func (m sessionModel) View() string {
 	t := m.runtime.themes.Active()
 	var sb strings.Builder
 
-	// Todo status
-	if m.runtime.todoStore != nil {
-		if ts := RenderTodoStatus(t, m.runtime.todoStore.Get()); ts != "" {
-			sb.WriteString(ts)
-		}
+	if m.state.Phase == sessionPermissionPrompt {
+		return m.renderPermissionPrompt()
 	}
 
-	// Spinner (when agent active) with animated message and elapsed time
 	if m.state.SpinnerActive {
-		bits := randomBinary(6)
-		localFrame := m.state.SpinnerFrame % 100
-		animatedMsg := renderAnimatedMsg(t, m.state.SpinnerMsg, spinnerAnimKind(m.state.SpinnerAnim), localFrame)
+		frame := tuiSpinnerFrames[m.state.SpinnerFrame%len(tuiSpinnerFrames)]
 		elapsed := ""
 		if !m.runtime.agentStartedAt.IsZero() {
-			elapsed = t.ANSIDim() + " (" + formatDuration(time.Since(m.runtime.agentStartedAt)) + ")" + t.ANSIReset()
+			elapsed = fmt.Sprintf(" %s(%s)%s", t.ANSIDim(), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset())
 		}
-		fmt.Fprintf(&sb, "\n  %s%s%s %s%s\n", t.ANSI(t.Primary), bits, t.ANSIReset(), animatedMsg, elapsed)
-	}
-
-	// Permission prompt (if in that state)
-	if m.state.Phase == sessionPermissionPrompt {
-		sb.WriteString(m.renderPermissionPrompt())
+		fmt.Fprintf(&sb, "  %s%s%s %sWorking…%s%s %s· Ctrl+C to interrupt%s",
+			t.ANSI(t.Primary), frame, t.ANSIReset(),
+			t.ANSIDim(), t.ANSIReset(),
+			elapsed,
+			t.ANSIDim(), t.ANSIReset(),
+		)
 		return sb.String()
 	}
 
-	// Textarea with horizontal-line borders
-	w := m.state.Width
-	if w <= 0 {
-		w = 80
-	}
-	lineStyle := lipgloss.NewStyle().Foreground(t.Dim)
-	idStyle := lipgloss.NewStyle().Foreground(t.Info)
-
-	// Top border with task ID right-aligned: ──────────── swift-falcon-a7 ──
-	if m.state.TaskID != "" {
-		label := m.state.TaskID
-		// suffix: " label ──" = len(label) + 4 visible chars
-		prefixLen := w - len(label) - 4
-		if prefixLen < 4 {
-			prefixLen = 4
-		}
-		sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", prefixLen)+" ") + idStyle.Render(label) + lineStyle.Render(" \u2500\u2500"))
-	} else {
-		sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", w)))
-	}
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().PaddingLeft(1).Render(m.runtime.textarea.View()))
-	sb.WriteString("\n")
-	sb.WriteString(lineStyle.Render(strings.Repeat("\u2500", w)))
-	sb.WriteString("\n")
-
-	// Autocomplete suggestions
-	if m.state.ShowSuggest && len(m.state.Suggestions) > 0 {
-		sb.WriteString(m.renderSuggestions())
-	}
-
-	// Context-dependent hints with turn count
-	hintStyle := lipgloss.NewStyle().Foreground(t.Dim)
-	turnInfo := ""
-	if m.state.TurnCount > 0 {
-		turnInfo = fmt.Sprintf(" \u00b7 turn %d", m.state.TurnCount)
-	}
-	if m.state.Phase == sessionAgentRunning {
-		sb.WriteString(hintStyle.Render(fmt.Sprintf("  ctrl+s send message \u00b7 ctrl+c interrupt \u00b7 ctrl+d exit%s", turnInfo)))
-	} else {
-		sb.WriteString(hintStyle.Render(fmt.Sprintf("  ctrl+s submit \u00b7 esc clear \u00b7 ctrl+d exit%s", turnInfo)))
-	}
-
+	fmt.Fprintf(&sb, "\n%s\n", m.runtime.input.View())
+	fmt.Fprintf(&sb, "%s  Enter submit · Esc clear · Ctrl+C interrupt/exit · Ctrl+D exit%s", t.ANSIDim(), t.ANSIReset())
 	return sb.String()
 }
 
@@ -510,7 +404,7 @@ func (m sessionModel) renderPermissionPrompt() string {
 		reason = m.state.PermDecision.Reason
 		command = m.state.PermDecision.Command
 	}
-	fmt.Fprintf(&sb, "\n%s\u26a0 Guard: %s%s\n", t.ANSI(t.Warning), reason, t.ANSIReset())
+	fmt.Fprintf(&sb, "\n%s⚠ Guard: %s%s\n", t.ANSI(t.Warning), reason, t.ANSIReset())
 	fmt.Fprintf(&sb, "  Tool: %s\n", m.state.PermToolName)
 	if command != "" {
 		fmt.Fprintf(&sb, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
@@ -518,7 +412,7 @@ func (m sessionModel) renderPermissionPrompt() string {
 
 	if m.state.PermPhase == permPromptFeedback {
 		fmt.Fprintf(&sb, "\n  Tell the agent what to do:\n  %s\n", m.runtime.permFeedback.View())
-		fmt.Fprintf(&sb, "  %sEnter to submit \u00b7 Esc to cancel%s\n", t.ANSIDim(), t.ANSIReset())
+		fmt.Fprintf(&sb, "  %sEnter to submit · Esc to cancel%s\n", t.ANSIDim(), t.ANSIReset())
 	} else {
 		fmt.Fprintf(&sb, "\n  [%sy%s] Allow once  [%sa%s] Always allow  [%sn%s] Deny  [%st%s] Tell what to do\n",
 			t.ANSI(t.Success), t.ANSIReset(),
@@ -526,102 +420,6 @@ func (m sessionModel) renderPermissionPrompt() string {
 			t.ANSI(t.Error), t.ANSIReset(),
 			t.ANSI(t.Link), t.ANSIReset())
 	}
-	return sb.String()
-}
-
-func (m *sessionModel) resizeTextarea() {
-	visLines := 0
-	textWidth := m.runtime.textarea.Width() - 2
-	if textWidth <= 0 {
-		textWidth = 1
-	}
-	for line := range strings.SplitSeq(m.runtime.textarea.Value(), "\n") {
-		if len(line) > textWidth {
-			visLines += (len(line) + textWidth - 1) / textWidth
-		} else {
-			visLines++
-		}
-	}
-	if visLines < 2 {
-		visLines = 2
-	}
-	if visLines > 20 {
-		visLines = 20
-	}
-	m.runtime.textarea.SetHeight(visLines)
-}
-
-func (m *sessionModel) updateSuggestions() {
-	val := m.runtime.textarea.Value()
-	if !strings.HasPrefix(val, "/") || strings.Contains(val, "\n") || strings.Contains(val, " ") {
-		m.state.ShowSuggest = false
-		m.state.Suggestions = nil
-		m.state.SuggestIdx = 0
-		return
-	}
-
-	prefix := strings.ToLower(strings.TrimPrefix(val, "/"))
-
-	var filtered []SlashCommand
-	for _, cmd := range m.state.Commands {
-		if strings.Contains(strings.ToLower(cmd.Name), prefix) {
-			filtered = append(filtered, cmd)
-		}
-	}
-
-	sort.SliceStable(filtered, func(i, j int) bool {
-		iPrefix := strings.HasPrefix(strings.ToLower(filtered[i].Name), prefix)
-		jPrefix := strings.HasPrefix(strings.ToLower(filtered[j].Name), prefix)
-		if iPrefix != jPrefix {
-			return iPrefix
-		}
-		return filtered[i].Name < filtered[j].Name
-	})
-
-	m.state.Suggestions = filtered
-	m.state.ShowSuggest = len(filtered) > 0
-	if m.state.SuggestIdx >= len(filtered) {
-		m.state.SuggestIdx = 0
-	}
-}
-
-func (m sessionModel) renderSuggestions() string {
-	t := m.runtime.themes.Active()
-	nameStyle := lipgloss.NewStyle().Foreground(t.Command)
-	descStyle := lipgloss.NewStyle().Foreground(t.Dim)
-	selectedStyle := lipgloss.NewStyle().Background(t.SelectedBg)
-	sourceStyle := lipgloss.NewStyle().Foreground(t.Dim).Faint(true)
-
-	maxShow := 8
-	count := len(m.state.Suggestions)
-	if count > maxShow {
-		count = maxShow
-	}
-
-	var sb strings.Builder
-	for i := 0; i < count; i++ {
-		cmd := m.state.Suggestions[i]
-		name := nameStyle.Render("/" + cmd.Name)
-		desc := descStyle.Render(cmd.Description)
-
-		line := fmt.Sprintf("  %s  %s", name, desc)
-		if cmd.Source != "" && cmd.Source != "builtin" {
-			line += " " + sourceStyle.Render("["+cmd.Source+"]")
-		}
-
-		if i == m.state.SuggestIdx {
-			line = selectedStyle.Render(line)
-		}
-
-		sb.WriteString(line)
-		sb.WriteString("\n")
-	}
-
-	if len(m.state.Suggestions) > maxShow {
-		sb.WriteString(descStyle.Render(fmt.Sprintf("  ... and %d more", len(m.state.Suggestions)-maxShow)))
-		sb.WriteString("\n")
-	}
-
 	return sb.String()
 }
 

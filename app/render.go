@@ -95,16 +95,10 @@ func StartSpinner(w io.Writer, t *Theme, todos []tools.TodoItem) *Spinner {
 	s := &Spinner{w: w, stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(s.done)
-		msg := spinnerMessages[rand.Intn(len(spinnerMessages))]
 		ticker := time.NewTicker(80 * time.Millisecond)
 		defer ticker.Stop()
-		i := 0
-		nextSwap := 40 + rand.Intn(30) // swap message every ~3-5s
 
-		// Print todo status once at the start
-		if ts := RenderTodoStatus(t, todos); ts != "" {
-			fmt.Fprintf(w, "%s", ts)
-		}
+		_ = todos
 
 		for {
 			select {
@@ -112,13 +106,8 @@ func StartSpinner(w io.Writer, t *Theme, todos []tools.TodoItem) *Spinner {
 				fmt.Fprintf(w, "\r\033[K")
 				return
 			case <-ticker.C:
-				if i == nextSwap {
-					msg = spinnerMessages[rand.Intn(len(spinnerMessages))]
-					nextSwap = i + 40 + rand.Intn(30)
-				}
 				bits := randomBinary(6)
-				fmt.Fprintf(w, "\r\033[K  %s%s%s %s%s%s", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), msg, t.ANSIReset())
-				i++
+				fmt.Fprintf(w, "\r\033[K  %s%s%s %sWorking…%s", t.ANSI(t.Primary), bits, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())
 			}
 		}
 	}()
