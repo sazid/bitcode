@@ -431,29 +431,22 @@ func (m sessionModel) renderPromptEcho(text string) string {
 func (m sessionModel) renderSpinnerLine() string {
 	t := m.runtime.themes.Active()
 	frame := tuiSpinnerFrames[m.state.SpinnerFrame%len(tuiSpinnerFrames)]
-	parts := []string{fmt.Sprintf("%s%s%s %sWorking…%s", t.ANSIDim(), frame, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())}
+	parts := []string{fmt.Sprintf("%s%s%s", t.ANSIDim(), frame, t.ANSIReset())}
+	parts = append(parts, fmt.Sprintf("%sWorking…%s", t.ANSIDim(), t.ANSIReset()))
 	if !m.runtime.agentStartedAt.IsZero() {
 		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Info), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset()))
 	}
 	if m.state.ToolCallCount > 0 {
-		label := "tool calls"
-		if m.state.ToolCallCount == 1 {
-			label = "tool call"
-		}
-		parts = append(parts, fmt.Sprintf("%s%d %s%s", t.ANSI(t.Secondary), m.state.ToolCallCount, label, t.ANSIReset()))
+		parts = append(parts, fmt.Sprintf("%s%d tools%s", t.ANSI(t.Secondary), m.state.ToolCallCount, t.ANSIReset()))
 	}
 	if tokens := m.sessionTokenCount(); tokens > 0 {
-		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Secondary), formatCompactTokenCount(tokens), t.ANSIReset()))
+		parts = append(parts, fmt.Sprintf("%s%s tok%s", t.ANSI(t.Secondary), formatCompactTokenCount(tokens), t.ANSIReset()))
 	}
 	if m.state.TurnCount > 0 {
-		label := "turns"
-		if m.state.TurnCount == 1 {
-			label = "turn"
-		}
-		parts = append(parts, fmt.Sprintf("%s%d %s%s", t.ANSI(t.Warning), m.state.TurnCount, label, t.ANSIReset()))
+		parts = append(parts, fmt.Sprintf("%s%d turns%s", t.ANSI(t.Warning), m.state.TurnCount, t.ANSIReset()))
 	}
 	if last := strings.TrimSpace(m.state.LastToolName); last != "" {
-		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Primary), compactStatusLabel(last, 28), t.ANSIReset()))
+		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Primary), compactStatusLabel(last, 18), t.ANSIReset()))
 	}
 	return "  " + strings.Join(parts, fmt.Sprintf(" %s·%s ", t.ANSIDim(), t.ANSIReset()))
 }

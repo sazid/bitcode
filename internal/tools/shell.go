@@ -227,7 +227,7 @@ func (b *ShellTool) Execute(input json.RawMessage, eventsCh chan<- internal.Even
 
 	eventsCh <- internal.Event{
 		Name:        b.Name(),
-		Args:        []string{params.Description, params.Command},
+		Args:        []string{strings.TrimSpace(params.Description), params.Command},
 		Message:     message,
 		Preview:     previewLines,
 		PreviewType: internal.PreviewBash,

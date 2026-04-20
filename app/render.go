@@ -10,7 +10,6 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/sazid/bitcode/internal"
-	"github.com/sazid/bitcode/internal/tools"
 )
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -116,35 +115,34 @@ func renderGuardEvent(w io.Writer, t *Theme, e internal.Event) {
 }
 
 func renderShellEvent(w io.Writer, t *Theme, e internal.Event) {
+	description := strings.TrimSpace(firstArg(e.Args))
 	command := ""
 	if len(e.Args) > 1 {
-		command = e.Args[1]
+		command = strings.TrimSpace(e.Args[1])
 	}
-	shellPath := tools.GetShellInfo().Path
-	title := fmt.Sprintf("Execute [%s]", shellPath)
-	if command != "" {
-		title = fmt.Sprintf("%s %s", title, command)
+	title := "Execute"
+	if description != "" {
+		title = fmt.Sprintf("%s %s", title, description)
 	}
 	renderEventHeader(w, t, e, title)
-	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
+
+	lines := make([]string, 0, len(e.Preview)+2)
+	if command != "" {
+		lines = append(lines, formatShellCommandLine(t, command))
+	}
 	if e.IsError && e.Message != "" {
-		lines = append([]string{t.ANSI(t.Error) + e.Message + t.ANSIReset()}, lines...)
-	} else if shouldRenderEventMessage(e) {
-		lines = append([]string{e.Message}, lines...)
+		lines = append(lines, t.ANSI(t.Error)+e.Message+t.ANSIReset())
+	}
+	lines = append(lines, formatPreviewLines(t, e.PreviewType, e.Preview)...)
+	if !e.IsError && shouldRenderEventMessage(e) {
+		lines = append(lines, e.Message)
 	}
 	renderEventLines(w, lines...)
 }
 
 func renderFileEvent(w io.Writer, t *Theme, e internal.Event) {
 	target := displayPath(firstArg(e.Args))
-	title := e.Name
-	if e.Name == "Read" {
-		title = buildReadTitle(target, readRangeArg(e.Args))
-	} else if e.Name == "Edit" && target != "" {
-		title = fmt.Sprintf("Update %s", target)
-	} else if target != "" {
-		title = fmt.Sprintf("%s %s", e.Name, target)
-	}
+	title := buildFileEventTitle(e.Name, target)
 	renderEventHeader(w, t, e, title)
 	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
 	if shouldRenderEventMessage(e) {
@@ -255,6 +253,28 @@ func buildReadTitle(path, lineRange string) string {
 	return fmt.Sprintf("%s %s:%s", title, path, lineRange)
 }
 
+func buildFileEventTitle(name, path string) string {
+	switch name {
+	case "Read":
+		return buildReadTitle(path, "")
+	case "Edit":
+		if path != "" {
+			return fmt.Sprintf("Update %s", path)
+		}
+		return "Update"
+	case "Write":
+		if path != "" {
+			return fmt.Sprintf("Create %s", path)
+		}
+		return "Create"
+	default:
+		if path != "" {
+			return fmt.Sprintf("%s %s", name, path)
+		}
+		return name
+	}
+}
+
 func displayPath(path string) string {
 	if path == "" {
 		return ""
@@ -281,7 +301,14 @@ func shouldRenderEventMessage(e internal.Event) bool {
 	if e.Name == "Edit" && e.PreviewType == internal.PreviewDiff && strings.HasPrefix(e.Message, "Replaced ") {
 		return false
 	}
+	if e.Name == "Write" && e.PreviewType == internal.PreviewDiff && strings.HasPrefix(e.Message, "Wrote ") {
+		return false
+	}
 	return true
+}
+
+func formatShellCommandLine(t *Theme, command string) string {
+	return fmt.Sprintf("%s$ %s%s", t.ANSIDim(), command, t.ANSIReset())
 }
 
 func renderPreviewLine(t *Theme, pt internal.PreviewType, line string) string {
