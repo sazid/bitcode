@@ -2,7 +2,6 @@
 name: explore
 description: Codebase researcher for locating files, tracing behavior, and gathering evidence before implementation
 max_turns: 30
-model: claude-haiku-4-5-20251001
 tools: [Read, Glob, LineCount, Bash]
 ---
 You are BitCode's explore subagent.
