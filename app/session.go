@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -351,59 +352,66 @@ func (m sessionModel) View() string {
 		if !m.runtime.agentStartedAt.IsZero() {
 			elapsed = fmt.Sprintf(" %s(%s)%s", t.ANSIDim(), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset())
 		}
-		fmt.Fprintf(&sb, "  %s%s%s %sWorking…%s%s\n",
+		fmt.Fprint(&sb, m.renderStatusBar())
+		fmt.Fprintf(&sb, "\n  %s%s%s %sWorking…%s%s",
 			t.ANSIDim(), frame, t.ANSIReset(),
 			t.ANSIDim(), t.ANSIReset(),
 			elapsed,
 		)
-		fmt.Fprint(&sb, m.renderStatusLine(true))
 		return sb.String()
 	}
 
-	fmt.Fprintf(&sb, "%s\n", m.runtime.input.View())
-	fmt.Fprint(&sb, m.renderStatusLine(false))
+	fmt.Fprint(&sb, m.renderStatusBar())
+	fmt.Fprintf(&sb, "\n%s", m.runtime.input.View())
 	return sb.String()
 }
 
-func (m sessionModel) renderStatusLine(running bool) string {
+func (m sessionModel) renderStatusBar() string {
 	t := m.runtime.themes.Active()
-	sep := fmt.Sprintf("%s · %s", t.ANSIDim(), t.ANSIReset())
+	width := m.state.Width
+	if width <= 0 {
+		width = 80
+	}
 
-	segments := make([]string, 0, 8)
+	leftParts := make([]string, 0, 2)
 	if project := strings.TrimSpace(m.state.Status.Project); project != "" {
-		segments = append(segments, t.ANSI(t.Primary)+compactStatusLabel(project, 18)+t.ANSIReset())
+		leftParts = append(leftParts, t.ANSI(t.Primary)+" "+project+t.ANSIReset())
 	}
 	if branch := strings.TrimSpace(m.state.Status.Branch); branch != "" {
-		segments = append(segments, t.ANSI(t.Secondary)+compactStatusLabel(branch, 18)+t.ANSIReset())
+		leftParts = append(leftParts, t.ANSI(t.Secondary)+" "+branch+t.ANSIReset())
 	}
-	if model := strings.TrimSpace(m.state.Status.Model); model != "" {
-		segments = append(segments, t.ANSIDim()+compactStatusLabel(model, 28)+t.ANSIReset())
+	left := strings.Join(leftParts, "  ")
+
+	rightParts := make([]string, 0, 2)
+	modelLabel := strings.TrimSpace(m.state.Status.Model)
+	if modelLabel != "" {
+		rightParts = append(rightParts, t.ANSI(t.Info)+modelLabel+t.ANSIReset())
 	}
 	if reasoning := strings.TrimSpace(m.state.Status.Reasoning); reasoning != "" {
-		segments = append(segments, t.ANSIDim()+"reasoning:"+compactStatusLabel(reasoning, 12)+t.ANSIReset())
+		rightParts = append(rightParts, t.ANSIDim()+strings.ToUpper(reasoning)+t.ANSIReset())
 	}
-	if running {
-		segments = append(segments, t.ANSIDim()+"Ctrl+C interrupt"+t.ANSIReset())
-	} else {
-		segments = append(segments,
-			t.ANSIDim()+"Enter send"+t.ANSIReset(),
-			t.ANSIDim()+"Esc clear"+t.ANSIReset(),
-			t.ANSIDim()+"Ctrl+D exit"+t.ANSIReset(),
-		)
+	right := strings.Join(rightParts, "  ")
+	if right == "" {
+		right = t.ANSIDim() + "BitCode" + t.ANSIReset()
 	}
 
-	return "  " + strings.Join(segments, sep)
+	plainLeft := plainText(left)
+	plainRight := plainText(right)
+	gap := width - 2 - visualWidth(plainLeft) - visualWidth(plainRight)
+	if gap < 2 {
+		gap = 2
+	}
+
+	return " " + left + strings.Repeat(" ", gap) + right
 }
 
-func compactStatusLabel(value string, max int) string {
-	value = strings.TrimSpace(value)
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	if max <= 1 {
-		return value[:max]
-	}
-	return value[:max-1] + "…"
+func plainText(s string) string {
+	ansiPattern := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiPattern.ReplaceAllString(s, "")
+}
+
+func visualWidth(s string) int {
+	return len([]rune(s))
 }
 
 func (m sessionModel) renderPermissionPrompt() string {
