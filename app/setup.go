@@ -117,6 +117,19 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 		Active:   true,
 	})
 
+	mgr.Register(reminder.Reminder{
+		ID:      "doom-loop-detection",
+		Content: "You appear to be repeating the same tool-call pattern without making progress. Stop, summarize what is failing, inspect the latest results carefully, and choose a different approach instead of retrying the same sequence again.",
+		Schedule: reminder.Schedule{
+			Kind:      reminder.ScheduleCondition,
+			MaxFires:  3,
+			Condition: reminder.ParseConditionString("repeated_tool_chain:Read>Read>Read|3"),
+		},
+		Source:   "builtin",
+		Priority: 3,
+		Active:   true,
+	})
+
 	if len(instructionFiles) > 0 {
 		mgr.Register(reminder.Reminder{
 			ID:      "instruction-files",

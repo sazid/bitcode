@@ -10,19 +10,22 @@ import (
 
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/tools"
 )
 
 // mockProvider implements llm.Provider for testing.
 type mockProvider struct {
 	responses []llm.CompletionResponse
+	requests  []llm.CompletionParams
 	callIdx   int
 	mu        sync.Mutex
 }
 
-func (m *mockProvider) Complete(_ context.Context, _ llm.CompletionParams, _ func(llm.StreamDelta)) (*llm.CompletionResponse, error) {
+func (m *mockProvider) Complete(_ context.Context, params llm.CompletionParams, _ func(llm.StreamDelta)) (*llm.CompletionResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.requests = append(m.requests, params)
 	if m.callIdx >= len(m.responses) {
 		return &llm.CompletionResponse{
 			Message:      llm.TextMessage(llm.RoleAssistant, "no more responses"),
@@ -418,6 +421,100 @@ func TestRunnerToolFailureReturnsReflectionMessage(t *testing.T) {
 	}
 	if want := "Reflect on why this failed"; !contains(toolMsg, want) {
 		t.Fatalf("expected tool message to contain %q, got %q", want, toolMsg)
+	}
+}
+
+func TestRunnerDoomLoopReminderInjected(t *testing.T) {
+	provider := &mockProvider{
+		responses: []llm.CompletionResponse{
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Retrying reads."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc1", Name: "Read", Arguments: `{"path":"a.go"}`},
+						{ID: "tc2", Name: "Read", Arguments: `{"path":"b.go"}`},
+						{ID: "tc3", Name: "Read", Arguments: `{"path":"c.go"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Retrying reads again."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc4", Name: "Read", Arguments: `{"path":"a.go"}`},
+						{ID: "tc5", Name: "Read", Arguments: `{"path":"b.go"}`},
+						{ID: "tc6", Name: "Read", Arguments: `{"path":"c.go"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "One more retry."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc7", Name: "Read", Arguments: `{"path":"a.go"}`},
+						{ID: "tc8", Name: "Read", Arguments: `{"path":"b.go"}`},
+						{ID: "tc9", Name: "Read", Arguments: `{"path":"c.go"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "Breaking out of the loop."),
+				FinishReason: llm.FinishStop,
+			},
+		},
+	}
+
+	mgr := tools.NewManager()
+	mgr.Register(&mockTool{name: "Read", result: "ok"})
+
+	reminders := reminder.NewManager()
+	reminders.Register(reminder.Reminder{
+		ID:      "doom-loop",
+		Content: "You appear to be repeating the same tool-call pattern without making progress.",
+		Schedule: reminder.Schedule{
+			Kind:      reminder.ScheduleCondition,
+			MaxFires:  1,
+			Condition: reminder.ParseConditionString("repeated_tool_chain:Read>Read>Read|3"),
+		},
+		Active: true,
+	})
+
+	cfg := &Config{
+		Provider:  provider,
+		Tools:     mgr,
+		Reminders: reminders,
+		MaxTurns:  6,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	result, err := runner.Run(context.Background(), []llm.Message{
+		llm.TextMessage(llm.RoleUser, "Keep trying reads"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "Breaking out of the loop." {
+		t.Fatalf("unexpected final output: %q", result.Output)
+	}
+	if provider.callIdx != 4 {
+		t.Fatalf("expected 4 provider calls, got %d", provider.callIdx)
+	}
+	if len(provider.requests) != 4 {
+		t.Fatalf("expected 4 captured requests, got %d", len(provider.requests))
+	}
+	thirdRequest := provider.requests[3]
+	if len(thirdRequest.Messages) == 0 {
+		t.Fatal("expected third request to contain messages")
+	}
+	lastPrompt := thirdRequest.Messages[len(thirdRequest.Messages)-1].Text()
+	if want := "You appear to be repeating the same tool-call pattern without making progress."; !contains(lastPrompt, want) {
+		t.Fatalf("expected injected doom-loop reminder in final request, got %q", lastPrompt)
 	}
 }
 

@@ -66,6 +66,7 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 
 	startTime := time.Now()
 	var lastToolNames []string
+	var recentToolCallChains []string
 	var responseID string    // for StatefulProvider (Responses API)
 	var prevMessageCount int // messages already covered by previous_response_id
 	var totalUsage llm.Usage
@@ -109,10 +110,11 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 		messagesForAPI := messages
 		if cfg.Reminders != nil {
 			state := &reminder.ConversationState{
-				Turn:          turn,
-				Messages:      messages,
-				LastToolCalls: lastToolNames,
-				ElapsedTime:   time.Since(startTime),
+				Turn:                 turn,
+				Messages:             messages,
+				LastToolCalls:        lastToolNames,
+				RecentToolCallChains: recentToolCallChains,
+				ElapsedTime:          time.Since(startTime),
 			}
 			if active := cfg.Reminders.Evaluate(state); len(active) > 0 {
 				messagesForAPI = reminder.InjectReminders(messages, active)
@@ -244,6 +246,12 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 			lastToolNames = make([]string, 0, len(resp.Message.ToolCalls))
 			for _, tc := range resp.Message.ToolCalls {
 				lastToolNames = append(lastToolNames, tc.Name)
+			}
+			if len(lastToolNames) > 0 {
+				recentToolCallChains = append(recentToolCallChains, strings.Join(lastToolNames, ">"))
+				if len(recentToolCallChains) > 8 {
+					recentToolCallChains = recentToolCallChains[len(recentToolCallChains)-8:]
+				}
 			}
 
 			// Separate Agent calls from regular calls for parallel execution

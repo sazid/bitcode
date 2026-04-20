@@ -133,6 +133,32 @@ func ParseConditionString(cond string) ConditionFunc {
 		}
 	}
 
+	if prefix, ok := strings.CutPrefix(cond, "repeated_tool_chain:"); ok {
+		parts := strings.Split(prefix, "|")
+		if len(parts) != 2 {
+			return func(_ *ConversationState) bool { return false }
+		}
+		chain := strings.TrimSpace(parts[0])
+		var threshold int
+		for _, c := range strings.TrimSpace(parts[1]) {
+			if c >= '0' && c <= '9' {
+				threshold = threshold*10 + int(c-'0')
+			}
+		}
+		if chain == "" || threshold <= 0 {
+			return func(_ *ConversationState) bool { return false }
+		}
+		return func(state *ConversationState) bool {
+			count := 0
+			for _, recent := range state.RecentToolCallChains {
+				if recent == chain {
+					count++
+				}
+			}
+			return count >= threshold
+		}
+	}
+
 	if after, ok := strings.CutPrefix(cond, "turn_gt:"); ok {
 		var threshold int
 		for _, c := range after {

@@ -235,6 +235,35 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestEvaluate_RepeatedToolChainReminder(t *testing.T) {
+	m := NewManager()
+	m.Register(Reminder{
+		ID:      "doom-loop",
+		Content: "stuck",
+		Schedule: Schedule{
+			Kind:      ScheduleCondition,
+			MaxFires:  2,
+			Condition: ParseConditionString("repeated_tool_chain:Read>Read>Read|3"),
+		},
+		Active: true,
+	})
+
+	state := &ConversationState{Turn: 0, RecentToolCallChains: []string{"Read>Read>Read", "Read>Read>Read"}}
+	if len(m.Evaluate(state)) != 0 {
+		t.Fatal("expected no reminder before threshold")
+	}
+
+	state.Turn = 1
+	state.RecentToolCallChains = []string{"Read>Read>Read", "Edit", "Read>Read>Read", "Read>Read>Read"}
+	result := m.Evaluate(state)
+	if len(result) != 1 {
+		t.Fatalf("expected reminder at threshold, got %d", len(result))
+	}
+	if result[0].ID != "doom-loop" {
+		t.Fatalf("expected doom-loop reminder, got %q", result[0].ID)
+	}
+}
+
 func TestInjectReminders(t *testing.T) {
 	messages := []llm.Message{
 		llm.TextMessage(llm.RoleSystem, "system prompt"),
@@ -360,6 +389,22 @@ func TestParseConditionString(t *testing.T) {
 		state := &ConversationState{LastToolCalls: []string{"Write"}}
 		if !fn(state) {
 			t.Error("should match Write")
+		}
+	})
+
+	t.Run("repeated_tool_chain match", func(t *testing.T) {
+		fn := ParseConditionString("repeated_tool_chain:Read>Read>Read|3")
+		state := &ConversationState{RecentToolCallChains: []string{"Read>Read>Read", "Edit", "Read>Read>Read", "Read>Read>Read"}}
+		if !fn(state) {
+			t.Error("expected repeated tool chain to match")
+		}
+	})
+
+	t.Run("repeated_tool_chain no match", func(t *testing.T) {
+		fn := ParseConditionString("repeated_tool_chain:Read>Read>Read|3")
+		state := &ConversationState{RecentToolCallChains: []string{"Read>Read>Read", "Edit", "Read>Read>Read"}}
+		if fn(state) {
+			t.Error("expected repeated tool chain to stay below threshold")
 		}
 	})
 
