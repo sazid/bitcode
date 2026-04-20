@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,7 +284,7 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 					Role: llm.RoleUser,
 					Content: []llm.ContentBlock{{
 						Type: llm.ContentText,
-						Text: "<system-reminder>You have incomplete todos. You must complete all todos before stopping. Use TodoRead to check your current todos and continue working.</system-reminder>",
+						Text: buildIncompleteTodosReminder(cfg.TodoStore.Get()),
 					}},
 				})
 				continue
@@ -363,13 +364,36 @@ func (r *Runner) executeToolCall(ctx context.Context, tc llm.ToolCall, eventsCh 
 			Message: fmt.Sprintf("Error: %v", err),
 			IsError: true,
 		}
-		content = fmt.Sprintf("Error: %v", err)
+		content = buildToolFailureMessage(tc, err)
 	}
 	return llm.Message{
 		Role:       llm.RoleTool,
 		Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: content}},
 		ToolCallID: tc.ID,
 	}
+}
+
+func buildIncompleteTodosReminder(todos []tools.TodoItem) string {
+	if len(todos) == 0 {
+		return "<system-reminder>You have incomplete todos. Use TodoRead to inspect them, continue working, and only stop after every todo is complete.</system-reminder>"
+	}
+
+	var pending []string
+	for _, todo := range todos {
+		if todo.Status == "completed" {
+			continue
+		}
+		pending = append(pending, fmt.Sprintf("- [%s] %s", todo.Status, todo.Content))
+	}
+	if len(pending) == 0 {
+		return "<system-reminder>You still have todo state to reconcile. Review it with TodoRead and only stop after every todo is complete.</system-reminder>"
+	}
+
+	return fmt.Sprintf("<system-reminder>You tried to stop with incomplete todos. Review the remaining work, continue the task, and only stop after every todo is complete. Remaining todos:\n%s\nIf needed, call TodoRead to inspect the full list before proceeding.</system-reminder>", strings.Join(pending, "\n"))
+}
+
+func buildToolFailureMessage(tc llm.ToolCall, err error) string {
+	return fmt.Sprintf("Tool call failed for %s.\nArguments: %s\nError: %v\nReflect on why this failed, fix the tool call, and try again if the task still requires it.", tc.Name, tc.Arguments, err)
 }
 
 // executeAgentCallsParallel runs multiple Agent tool calls concurrently

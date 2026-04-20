@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -37,12 +38,16 @@ func (m *mockProvider) Complete(_ context.Context, _ llm.CompletionParams, _ fun
 type mockTool struct {
 	name   string
 	result string
+	err    error
 }
 
-func (t *mockTool) Name() string              { return t.name }
-func (t *mockTool) Description() string       { return "mock " + t.name }
+func (t *mockTool) Name() string                     { return t.name }
+func (t *mockTool) Description() string              { return "mock " + t.name }
 func (t *mockTool) ParametersSchema() map[string]any { return map[string]any{"type": "object"} }
 func (t *mockTool) Execute(_ json.RawMessage, _ chan<- internal.Event) (tools.ToolResult, error) {
+	if t.err != nil {
+		return tools.ToolResult{}, t.err
+	}
 	return tools.ToolResult{Content: t.result}, nil
 }
 
@@ -284,4 +289,138 @@ func TestRunnerRetryExhausted(t *testing.T) {
 	if provider.callCount != 3 {
 		t.Errorf("expected 3 provider calls (1 + 2 retries), got %d", provider.callCount)
 	}
+}
+
+func TestRunnerStopWithIncompleteTodosInjectsStructuredReminder(t *testing.T) {
+	provider := &mockProvider{
+		responses: []llm.CompletionResponse{
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "I think I am done."),
+				FinishReason: llm.FinishStop,
+			},
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Let me finish the remaining tasks."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc1", Name: "TodoWrite", Arguments: `{"todos":[{"content":"Fix bug","status":"completed"},{"content":"Run tests","status":"completed"}]}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "Now I am actually done."),
+				FinishReason: llm.FinishStop,
+			},
+		},
+	}
+
+	store := tools.NewTodoStore()
+	store.Set([]tools.TodoItem{
+		{Content: "Inspect code", Status: "completed"},
+		{Content: "Fix bug", Status: "in_progress"},
+		{Content: "Run tests", Status: "pending"},
+	})
+
+	mgr := tools.NewManager()
+	mgr.Register(&tools.TodoWriteTool{Store: store})
+
+	cfg := &Config{
+		Provider:  provider,
+		Tools:     mgr,
+		TodoStore: store,
+		MaxTurns:  6,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	result, err := runner.Run(context.Background(), []llm.Message{
+		llm.TextMessage(llm.RoleSystem, "You are a test agent."),
+		llm.TextMessage(llm.RoleUser, "Finish the task"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "Now I am actually done." {
+		t.Fatalf("unexpected final output: %q", result.Output)
+	}
+	if provider.callIdx != 3 {
+		t.Fatalf("expected 3 provider calls, got %d", provider.callIdx)
+	}
+	if len(result.Messages) != 7 {
+		t.Fatalf("expected 7 messages, got %d", len(result.Messages))
+	}
+	reminder := result.Messages[3].Text()
+	if reminder == "" {
+		t.Fatal("expected injected reminder text")
+	}
+	if want := "You tried to stop with incomplete todos."; !contains(reminder, want) {
+		t.Fatalf("expected reminder to contain %q, got %q", want, reminder)
+	}
+	if want := "- [in_progress] Fix bug"; !contains(reminder, want) {
+		t.Fatalf("expected reminder to contain %q, got %q", want, reminder)
+	}
+	if want := "- [pending] Run tests"; !contains(reminder, want) {
+		t.Fatalf("expected reminder to contain %q, got %q", want, reminder)
+	}
+	if len(store.Get()) != 0 {
+		t.Fatalf("expected todos to be cleared after completion, got %+v", store.Get())
+	}
+}
+
+func TestRunnerToolFailureReturnsReflectionMessage(t *testing.T) {
+	provider := &mockProvider{
+		responses: []llm.CompletionResponse{
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Trying a read."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc1", Name: "Read", Arguments: `{"path":"missing.txt"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "Handled the failure."),
+				FinishReason: llm.FinishStop,
+			},
+		},
+	}
+
+	mgr := tools.NewManager()
+	mgr.Register(&mockTool{name: "Read", err: fmt.Errorf("boom")})
+
+	cfg := &Config{
+		Provider: provider,
+		Tools:    mgr,
+		MaxTurns: 5,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	result, err := runner.Run(context.Background(), []llm.Message{
+		llm.TextMessage(llm.RoleUser, "Read the file"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "Handled the failure." {
+		t.Fatalf("unexpected final output: %q", result.Output)
+	}
+	if len(result.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(result.Messages))
+	}
+	toolMsg := result.Messages[2].Text()
+	if want := "Tool call failed for Read."; !contains(toolMsg, want) {
+		t.Fatalf("expected tool message to contain %q, got %q", want, toolMsg)
+	}
+	if want := "Arguments: {\"path\":\"missing.txt\"}"; !contains(toolMsg, want) {
+		t.Fatalf("expected tool message to contain %q, got %q", want, toolMsg)
+	}
+	if want := "Reflect on why this failed"; !contains(toolMsg, want) {
+		t.Fatalf("expected tool message to contain %q, got %q", want, toolMsg)
+	}
+}
+
+func contains(haystack, needle string) bool {
+	return strings.Contains(haystack, needle)
 }
