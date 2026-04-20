@@ -115,6 +115,8 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 				LastToolCalls:        lastToolNames,
 				RecentToolCallChains: recentToolCallChains,
 				ElapsedTime:          time.Since(startTime),
+				AssistantText:        latestAssistantText(messages),
+				UserText:             latestUserText(messages),
 			}
 			if active := cfg.Reminders.Evaluate(state); len(active) > 0 {
 				messagesForAPI = reminder.InjectReminders(messages, active)
@@ -515,6 +517,28 @@ func drainInjectedMessages(cfg *Config, messages *[]llm.Message) {
 			return
 		}
 	}
+}
+
+func latestUserText(messages []llm.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			if text := strings.TrimSpace(messages[i].Text()); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func latestAssistantText(messages []llm.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleAssistant {
+			if text := strings.TrimSpace(messages[i].Text()); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 // persistMessage appends a message to conversation storage if available.

@@ -94,6 +94,36 @@ func buildReminderManager(skillMgr skills.SkillProvider, instructionFiles []stri
 	})
 
 	mgr.Register(reminder.Reminder{
+		ID:      "subagent-explore-heuristic",
+		Content: "The task still looks investigative. If you are searching across files, tracing behavior, or trying to reduce uncertainty before editing, delegate now to the explore subagent and have it return the concrete findings.",
+		Schedule: reminder.Schedule{
+			Kind:     reminder.ScheduleCondition,
+			MaxFires: 2,
+			Condition: func(state *reminder.ConversationState) bool {
+				return shouldDelegateToExplore(state)
+			},
+		},
+		Source:   "builtin",
+		Priority: 2,
+		Active:   true,
+	})
+
+	mgr.Register(reminder.Reminder{
+		ID:      "subagent-plan-heuristic",
+		Content: "The task now looks like implementation design rather than simple execution. If the work needs sequencing, risk analysis, or coordinated changes across multiple files, delegate to the plan subagent before continuing the implementation.",
+		Schedule: reminder.Schedule{
+			Kind:     reminder.ScheduleCondition,
+			MaxFires: 2,
+			Condition: func(state *reminder.ConversationState) bool {
+				return shouldDelegateToPlan(state)
+			},
+		},
+		Source:   "builtin",
+		Priority: 2,
+		Active:   true,
+	})
+
+	mgr.Register(reminder.Reminder{
 		ID:      "subagent-delegation",
 		Content: "If the task is still growing in scope, spans multiple files, or needs isolated research before coding, consider delegating now: use the explore subagent for read-only codebase investigation and the plan subagent for implementation design and sequencing.",
 		Schedule: reminder.Schedule{
@@ -275,4 +305,89 @@ func buildSkillReminderContent(sm skills.SkillProvider) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func shouldDelegateToExplore(state *reminder.ConversationState) bool {
+	if state == nil {
+		return false
+	}
+	if state.Turn < 2 {
+		return false
+	}
+
+	lowerUser := strings.ToLower(state.UserText)
+	investigationLanguage := containsAny(lowerUser,
+		"find", "trace", "investigate", "understand", "locate", "where", "which file", "why", "how does", "search")
+	readHeavy := countReadOnlyChains(state.RecentToolCallChains) >= 2
+	uncertainAssistant := containsAny(strings.ToLower(state.AssistantText),
+		"let me inspect", "let me check", "i'll look", "i need to inspect", "i need to look", "i'm going to inspect")
+
+	return readHeavy && (investigationLanguage || uncertainAssistant)
+}
+
+func shouldDelegateToPlan(state *reminder.ConversationState) bool {
+	if state == nil {
+		return false
+	}
+	if state.Turn < 2 {
+		return false
+	}
+
+	lowerUser := strings.ToLower(state.UserText)
+	planningLanguage := containsAny(lowerUser,
+		"plan", "refactor", "migration", "redesign", "architecture", "rollout", "complex", "cross-file", "multi-step")
+	complexWorkflow := len(state.RecentToolCallChains) >= 3
+	mixedInvestigationAndMutation := sawReadHeavyAndMutation(state.RecentToolCallChains)
+	assistantPlanning := containsAny(strings.ToLower(state.AssistantText),
+		"plan", "steps", "approach", "strategy", "sequence", "risk")
+
+	return planningLanguage || (complexWorkflow && mixedInvestigationAndMutation) || assistantPlanning
+}
+
+func countReadOnlyChains(chains []string) int {
+	count := 0
+	for _, chain := range chains {
+		if isReadOnlyChain(chain) {
+			count++
+		}
+	}
+	return count
+}
+
+func sawReadHeavyAndMutation(chains []string) bool {
+	sawReadOnly := false
+	sawMutation := false
+	for _, chain := range chains {
+		if isReadOnlyChain(chain) {
+			sawReadOnly = true
+		}
+		if containsAny(strings.ToLower(chain), "edit", "write", "shell", "agent") {
+			sawMutation = true
+		}
+	}
+	return sawReadOnly && sawMutation
+}
+
+func isReadOnlyChain(chain string) bool {
+	parts := strings.Split(chain, ">")
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		switch strings.TrimSpace(part) {
+		case "Read", "Glob", "LineCount", "FileSize", "WebSearch", "Skill":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }

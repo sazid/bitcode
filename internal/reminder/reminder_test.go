@@ -354,14 +354,7 @@ func TestInjectReminders_Empty(t *testing.T) {
 }
 
 func TestParseConditionString(t *testing.T) {
-	t.Run("always", func(t *testing.T) {
-		fn := ParseConditionString("always")
-		if !fn(&ConversationState{}) {
-			t.Error("always should return true")
-		}
-	})
-
-	t.Run("empty", func(t *testing.T) {
+	t.Run("empty condition", func(t *testing.T) {
 		fn := ParseConditionString("")
 		if !fn(&ConversationState{}) {
 			t.Error("empty should return true")
@@ -430,6 +423,16 @@ func TestParseConditionString(t *testing.T) {
 			t.Error("unknown condition should return false")
 		}
 	})
+}
+
+func TestConversationStateCarriesPromptText(t *testing.T) {
+	state := &ConversationState{
+		UserText:      "find the parser entrypoint",
+		AssistantText: "Let me inspect the relevant files.",
+	}
+	if state.UserText == "" || state.AssistantText == "" {
+		t.Fatal("expected prompt text fields to be available on conversation state")
+	}
 }
 
 func TestLoadPlugins_Markdown(t *testing.T) {

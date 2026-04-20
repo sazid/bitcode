@@ -46,4 +46,6 @@ type ConversationState struct {
 	LastToolCalls        []string
 	RecentToolCallChains []string
 	ElapsedTime          time.Duration
+	AssistantText        string
+	UserText             string
 }
