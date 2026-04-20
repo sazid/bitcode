@@ -15,7 +15,6 @@ import (
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
-	"github.com/sazid/bitcode/internal/tools"
 )
 
 // --- Custom messages for agent-to-TUI communication ---
@@ -83,13 +82,6 @@ const (
 	sessionPermissionPrompt
 )
 
-type permPromptState int
-
-const (
-	permPromptChoosing permPromptState = iota
-	permPromptFeedback
-)
-
 // --- Serializable state / non-serializable runtime split ---
 
 // SessionState holds the pure, JSON-serializable portion of the session.
@@ -101,7 +93,6 @@ type SessionState struct {
 	Commands      []SlashCommand  `json:"commands"`
 	PermToolName  string          `json:"perm_tool_name,omitempty"`
 	PermDecision  *guard.Decision `json:"perm_decision,omitempty"`
-	PermPhase     permPromptState `json:"perm_phase"`
 	Width         int             `json:"width"`
 	Height        int             `json:"height"`
 	Quitting      bool            `json:"quitting"`
@@ -112,11 +103,9 @@ type SessionState struct {
 // SessionRuntime holds channels, widgets, and handles that cannot be serialized.
 type SessionRuntime struct {
 	input          textinput.Model
-	permFeedback   textinput.Model
 	submitCh       chan InputResult
 	permRespCh     chan guard.PermissionResult
 	agentCancel    context.CancelFunc
-	todoStore      tools.TodoStore
 	themes         *ThemeRegistry
 	flushing       bool
 	ticking        bool
@@ -142,10 +131,6 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 	input.TextStyle = lipgloss.NewStyle()
 	input.PromptStyle = lipgloss.NewStyle().Foreground(t.Primary)
 
-	feedback := textinput.New()
-	feedback.Placeholder = "Tell the agent what to do"
-	feedback.CharLimit = 500
-
 	return sessionModel{
 		state: SessionState{
 			Phase:    sessionIdle,
@@ -153,11 +138,9 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 			TaskID:   GenerateTaskID(),
 		},
 		runtime: SessionRuntime{
-			input:        input,
-			permFeedback: feedback,
-			submitCh:     submitCh,
-			todoStore:    config.TodoStore,
-			themes:       themes,
+			input:    input,
+			submitCh: submitCh,
+			themes:   themes,
 		},
 	}
 }
@@ -244,7 +227,6 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state.PermToolName = msg.toolName
 		m.state.PermDecision = &msg.decision
 		m.runtime.permRespCh = msg.responseCh
-		m.state.PermPhase = permPromptChoosing
 		m.runtime.input.Blur()
 		return m, nil
 
@@ -316,51 +298,29 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m sessionModel) updatePermission(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.state.PermPhase == permPromptFeedback {
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			switch keyMsg.Type {
-			case tea.KeyEnter:
-				if feedback := strings.TrimSpace(m.runtime.permFeedback.Value()); feedback != "" {
-					m.runtime.permRespCh <- guard.PermissionResult{Feedback: feedback}
-					m.runtime.permFeedback.Reset()
-					m.state.Phase = sessionAgentRunning
-					m.runtime.input.Focus()
-					return m, nil
-				}
-				return m, nil
-			case tea.KeyEsc, tea.KeyCtrlC:
-				m.state.PermPhase = permPromptChoosing
-				return m, nil
-			}
-		}
-		var cmd tea.Cmd
-		m.runtime.permFeedback, cmd = m.runtime.permFeedback.Update(msg)
-		return m, cmd
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
 	}
 
-	// Choosing state
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch strings.ToLower(keyMsg.String()) {
-		case "y":
-			m.runtime.permRespCh <- guard.PermissionResult{Approved: true, Cache: false}
-			m.state.Phase = sessionAgentRunning
-			m.runtime.input.Focus()
-			return m, nil
-		case "a":
-			m.runtime.permRespCh <- guard.PermissionResult{Approved: true, Cache: true}
-			m.state.Phase = sessionAgentRunning
-			m.runtime.input.Focus()
-			return m, nil
-		case "n":
-			m.runtime.permRespCh <- guard.PermissionResult{Approved: false}
-			m.state.Phase = sessionAgentRunning
-			m.runtime.input.Focus()
-			return m, nil
-		case "t":
-			m.state.PermPhase = permPromptFeedback
-			return m, m.runtime.permFeedback.Focus()
-		}
+	switch strings.ToLower(keyMsg.String()) {
+	case "y":
+		return m.finishPermissionPrompt(guard.PermissionResult{Approved: true, Cache: false})
+	case "a":
+		return m.finishPermissionPrompt(guard.PermissionResult{Approved: true, Cache: true})
+	case "n", "esc", "ctrl+c":
+		return m.finishPermissionPrompt(guard.PermissionResult{Approved: false})
+	default:
+		return m, nil
 	}
+}
+
+func (m sessionModel) finishPermissionPrompt(result guard.PermissionResult) (tea.Model, tea.Cmd) {
+	m.runtime.permRespCh <- result
+	m.state.Phase = sessionAgentRunning
+	m.state.PermToolName = ""
+	m.state.PermDecision = nil
+	m.runtime.input.Focus()
 	return m, nil
 }
 
@@ -405,22 +365,23 @@ func (m sessionModel) renderPermissionPrompt() string {
 		reason = m.state.PermDecision.Reason
 		command = m.state.PermDecision.Command
 	}
-	fmt.Fprintf(&sb, "\n%s⚠ Guard: %s%s\n", t.ANSI(t.Warning), reason, t.ANSIReset())
-	fmt.Fprintf(&sb, "  Tool: %s\n", m.state.PermToolName)
+
+	fmt.Fprintf(&sb, "\n%sPermission required%s\n", t.ANSI(t.Warning), t.ANSIReset())
+	if reason != "" {
+		fmt.Fprintf(&sb, "  %s\n", reason)
+	}
+	if m.state.PermToolName != "" {
+		fmt.Fprintf(&sb, "  Tool: %s\n", m.state.PermToolName)
+	}
 	if command != "" {
 		fmt.Fprintf(&sb, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
 	}
-
-	if m.state.PermPhase == permPromptFeedback {
-		fmt.Fprintf(&sb, "\n  Tell the agent what to do:\n  %s\n", m.runtime.permFeedback.View())
-		fmt.Fprintf(&sb, "  %sEnter to submit · Esc to cancel%s\n", t.ANSIDim(), t.ANSIReset())
-	} else {
-		fmt.Fprintf(&sb, "\n  [%sy%s] Allow once  [%sa%s] Always allow  [%sn%s] Deny  [%st%s] Tell what to do\n",
-			t.ANSI(t.Success), t.ANSIReset(),
-			t.ANSI(t.Success), t.ANSIReset(),
-			t.ANSI(t.Error), t.ANSIReset(),
-			t.ANSI(t.Link), t.ANSIReset())
-	}
+	fmt.Fprintf(&sb, "\n  [%sy%s] Allow once  [%sa%s] Always allow  [%sn%s] Deny\n",
+		t.ANSI(t.Success), t.ANSIReset(),
+		t.ANSI(t.Success), t.ANSIReset(),
+		t.ANSI(t.Error), t.ANSIReset(),
+	)
+	fmt.Fprintf(&sb, "  %sEsc or Ctrl+C deny%s\n", t.ANSIDim(), t.ANSIReset())
 	return sb.String()
 }
 
