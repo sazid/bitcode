@@ -188,8 +188,11 @@ func TestReadTool_EmitsEvent(t *testing.T) {
 	if events[0].Name != "Read" {
 		t.Errorf("expected event name 'Read', got %q", events[0].Name)
 	}
-	if len(events[0].Args) == 0 || events[0].Args[0] != filepath.Clean(path) {
-		t.Errorf("expected event arg to be clean path %q, got %v", path, events[0].Args)
+	if len(events[0].Args) < 2 || events[0].Args[0] != filepath.Clean(path) {
+		t.Errorf("expected event args to include clean path %q, got %v", path, events[0].Args)
+	}
+	if events[0].Args[1] != "1-2" {
+		t.Errorf("expected read range %q, got %q", "1-2", events[0].Args[1])
 	}
 }
 

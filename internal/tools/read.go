@@ -112,14 +112,25 @@ func (r *ReadTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 	}
 
 	info := fmt.Sprintf("Read %d lines", lineCount)
+	lineRange := formatReadRange(start, end)
 
 	eventsCh <- internal.Event{
 		Name:    r.Name(),
-		Args:    []string{cleanPath},
+		Args:    []string{cleanPath, lineRange},
 		Message: info,
 	}
 
 	return ToolResult{
 		Content: content.String(),
 	}, nil
+}
+
+func formatReadRange(start, end int64) string {
+	if end <= start {
+		return "empty"
+	}
+	if end-start == 1 {
+		return fmt.Sprintf("%d", start+1)
+	}
+	return fmt.Sprintf("%d-%d", start+1, end)
 }
