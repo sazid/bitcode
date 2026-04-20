@@ -27,11 +27,15 @@ Code with agents. Built-in security guards, resumable sessions, and subagents fo
 
 - **Agentic Coding** — Interactive TUI or single-shot mode (`-p`) with iterative tool calling
 - **Subagents** — Spawn specialized agents for complex tasks (explore, plan, general-purpose)
-- **Resume Sessions** — Continue any conversation with `-c` (single-shot) or scoped to your working directory
+- **Resume Sessions** — Continue any conversation with `/resume` in interactive mode or `-c` flag in single-shot mode; scoped to your working directory
+- **Conversation Management** — List, search, fork, rollback, and rename conversations; automatic persistence to `~/.bitcode/conversations/`
+- **Context Compaction** — Summarize and compact long conversations to free up context space with the `Compact` tool
 - **Security Guards** — Multi-layer validation: rules, user prompts, and LLM-powered guard agent
 - **Language-Aware Guards** — Bash, Python, Go, JavaScript, and PowerShell security skills
 - **Skills** — User-defined prompt templates from `.agents/`, `.claude/`, or `.bitcode/`
 - **System Reminders** — Dynamic context injection via `<system-reminder>` with [plugin support](docs/system-reminders.md)
+  - Built-in reminders: skill availability, conversation length warnings, core behavior, todo discipline, doom-loop detection, verification gates
+  - Custom plugin reminders via YAML files in `{.agents,.claude,.bitcode}/reminders/`
 - **Reasoning Control** — Adjust effort with `--reasoning` flag
 - **Multi-Provider** — Anthropic, OpenAI, OpenRouter, or any OpenAI-compatible API
 - **Multi-Modal** — Images, audio, documents
@@ -52,6 +56,8 @@ Code with agents. Built-in security guards, resumable sessions, and subagents fo
 | TodoRead | Read current todo list |
 | TodoWrite | Create or update todo list |
 | Skill | Invoke user-defined prompt templates |
+| Compact | Summarize and compact conversation history to free context space |
+| Agent | Spawn specialized subagents for complex tasks (explore, plan, general-purpose) |
 
 ## Requirements
 
@@ -109,6 +115,17 @@ This launches a TUI with a multiline input editor. Use `Ctrl+S` to submit, `Ente
 BITCODE_MODEL=claude-opus-4-6 ./bitcode -p "Explain main.go"
 ```
 
+### CLI Flags
+
+| Flag | Description |
+|---|---|
+| `-p "<prompt>"` | Single-shot mode with the given prompt (omit for interactive TUI) |
+| `-c <id>` | Resume a conversation by ID (single-shot mode only) |
+| `--reasoning [none/low/medium/high/xhigh]` | Set reasoning effort (let model decide if omitted) |
+| `--max-turns <n>` | Maximum agent turns per conversation (default: 100) |
+| `-q` | Quiet mode: suppress tool usage and spinner output (single-shot only) |
+| `--version` | Show version information |
+
 ## Environment Variables
 
 ### LLM Provider
@@ -120,6 +137,7 @@ BITCODE_MODEL=claude-opus-4-6 ./bitcode -p "Explain main.go"
 | `BITCODE_BASE_URL` | API endpoint | auto-detected from provider |
 | `BITCODE_PROVIDER` | Backend: `openai-chat`, `openai-responses`, `anthropic` | auto-detect from model name |
 | `BITCODE_WEBSOCKET` | Use WebSocket transport (only for `openai-responses`) | `false` |
+| `BITCODE_CONVERSATIONS` | Enable conversation persistence | `true` |
 
 The provider is auto-detected: if no base URL is set and the model starts with `claude-`, it connects to Anthropic's API directly. If a custom base URL is set (OpenRouter, Bedrock, local proxy, etc.), it always uses OpenAI Chat Completions format — the universal compatibility protocol these services expose.
 
@@ -197,8 +215,22 @@ Type these in the interactive prompt:
 | Command | Description |
 |---|---|
 | `/new` | Start a new conversation |
+| `/history` | List recent conversations |
+| `/search <query>` | Search conversations for a query |
+| `/resume <id> [safe-count]` | Resume a conversation by ID (with optional safe message count for recovery) |
+| `/fork <id> [msg-index]` | Fork a conversation at a specific message index |
+| `/rollback <id> <count>` | Trim a conversation to a safe message count |
+| `/rename <title>` | Rename the current conversation |
+| `/reasoning [none/low/medium/high/xhigh/clear]` | Set or clear reasoning effort |
+| `/turns [n]` | Get or set max agent turns |
+| `/theme [name]` | Switch theme (dark/light/mono) or show current |
+| `/stats` | Show session telemetry |
 | `/help` | Show help |
-| `/exit` | Exit BitCode |
+| `/exit`, `/quit` | Exit BitCode |
+
+### Skill Commands
+
+Custom skills defined in `.agents/`, `.claude/`, or `.bitcode/` directories can be invoked as `/<skill-name>`. See the [Skills](#skills) section for details.
 
 ## System Reminders
 
@@ -258,6 +290,11 @@ app/
   input.go          # TUI input editor (bubbletea textarea)
   render.go         # Terminal rendering (markdown, spinner, events)
   system_prompt.go  # System prompt construction
+  session.go        # TUI session model and orchestration
+  commands.go       # Slash command dispatcher
+  themes.go         # Theme registry (dark/light/mono)
+  lifecycle.go      # Session lifecycle management
+  setup.go          # Tool manager, reminder manager, guard manager builders
 internal/
   event.go          # Event types for tool output
   llm/
@@ -272,7 +309,13 @@ internal/
     skills/         # Guard agent security skills (bash, python, go, js, simulate)
   reminder/         # System reminder framework (evaluation, injection, plugins)
   skills/           # Skill discovery and management
-  tools/            # Tool implementations (read, write, edit, glob, bash, todo)
+  tools/            # Tool implementations (read, write, edit, glob, bash, todo, compact, skill, web_search)
+  agent/            # Subagent framework (Agent tool, registry, runner)
+  conversation/     # Conversation persistence (save/load, search, fork, rollback)
+  telemetry/        # Usage metrics collection and storage
+  notify/           # Desktop notifications
+  config/           # Instruction file discovery (CLAUDE.md, AGENTS.md)
+  version/          # Version information
 docs/
   tool-guards.md    # Tool guard architecture and customization
   todo.md           # Todo system usage guide
