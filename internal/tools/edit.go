@@ -116,26 +116,7 @@ func (e *EditTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 		return ToolResult{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	oldLines := strings.Split(params.OldString, "\n")
-	newLines := strings.Split(params.NewString, "\n")
-
-	var previewLines []string
-	maxPreview := 5
-	for i, line := range oldLines {
-		if i >= maxPreview {
-			previewLines = append(previewLines, "...")
-			break
-		}
-		previewLines = append(previewLines, "-"+line)
-	}
-	for i, line := range newLines {
-		if i >= maxPreview {
-			previewLines = append(previewLines, "...")
-			break
-		}
-		previewLines = append(previewLines, "+"+line)
-	}
-
+	previewLines := buildDiffPreview(previewPathForDiff(wd, cleanPath), params.OldString, params.NewString, 6)
 	msg := fmt.Sprintf("Replaced %d occurrence(s)", replacements)
 
 	eventsCh <- internal.Event{
@@ -149,4 +130,48 @@ func (e *EditTool) Execute(input json.RawMessage, eventsCh chan<- internal.Event
 	return ToolResult{
 		Content: msg,
 	}, nil
+}
+
+func buildDiffPreview(displayPath, oldContent, newContent string, maxPreview int) []string {
+	previewLines := []string{
+		fmt.Sprintf("--- %s", filepath.ToSlash(displayPath)),
+		fmt.Sprintf("+++ %s", filepath.ToSlash(displayPath)),
+		"@@",
+	}
+
+	for i, line := range previewContentLines(oldContent) {
+		if i >= maxPreview {
+			previewLines = append(previewLines, "...")
+			break
+		}
+		previewLines = append(previewLines, "-"+line)
+	}
+	for i, line := range previewContentLines(newContent) {
+		if i >= maxPreview {
+			previewLines = append(previewLines, "...")
+			break
+		}
+		previewLines = append(previewLines, "+"+line)
+	}
+
+	return previewLines
+}
+
+func previewContentLines(content string) []string {
+	trimmed := strings.TrimSuffix(content, "\n")
+	if trimmed == "" {
+		if content == "" {
+			return nil
+		}
+		return []string{""}
+	}
+	return strings.Split(trimmed, "\n")
+}
+
+func previewPathForDiff(wd, cleanPath string) string {
+	rel, err := filepath.Rel(wd, cleanPath)
+	if err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return cleanPath
 }

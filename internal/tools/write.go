@@ -77,6 +77,13 @@ func (w *WriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.Even
 		return ToolResult{}, fmt.Errorf("file_path cannot contain '..' for security reasons")
 	}
 
+	previousContent := ""
+	if buf, readErr := os.ReadFile(cleanPath); readErr == nil {
+		previousContent = string(buf)
+	} else if !os.IsNotExist(readErr) {
+		return ToolResult{}, fmt.Errorf("failed to read existing file: %w", readErr)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(cleanPath), 0o755); err != nil {
 		return ToolResult{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
@@ -90,16 +97,7 @@ func (w *WriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.Even
 		lineCount++
 	}
 
-	contentLines := strings.Split(params.Content, "\n")
-	previewCount := min(5, len(contentLines))
-	previewLines := make([]string, previewCount)
-	for i := 0; i < previewCount; i++ {
-		previewLines[i] = fmt.Sprintf("%5d\t%s", i+1, contentLines[i])
-	}
-	if len(contentLines) > previewCount {
-		previewLines = append(previewLines, "...")
-	}
-
+	previewLines := buildDiffPreview(previewPathForDiff(wd, cleanPath), previousContent, params.Content, 6)
 	info := fmt.Sprintf("Wrote %d lines", lineCount)
 
 	eventsCh <- internal.Event{
@@ -107,7 +105,7 @@ func (w *WriteTool) Execute(input json.RawMessage, eventsCh chan<- internal.Even
 		Args:        []string{cleanPath},
 		Message:     info,
 		Preview:     previewLines,
-		PreviewType: internal.PreviewCode,
+		PreviewType: internal.PreviewDiff,
 	}
 
 	return ToolResult{

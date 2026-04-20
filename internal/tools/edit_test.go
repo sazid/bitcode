@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sazid/bitcode/internal"
@@ -134,6 +135,18 @@ func TestEditTool_EmitsEvent(t *testing.T) {
 	}
 	if len(events[0].Args) == 0 || events[0].Args[0] != filepath.Clean(filePath) {
 		t.Errorf("expected event arg %q, got %v", filePath, events[0].Args)
+	}
+	if events[0].PreviewType != internal.PreviewDiff {
+		t.Fatalf("expected diff preview, got %q", events[0].PreviewType)
+	}
+	if len(events[0].Preview) < 5 {
+		t.Fatalf("expected diff preview lines, got %v", events[0].Preview)
+	}
+	if !strings.HasPrefix(events[0].Preview[0], "--- ") || !strings.HasPrefix(events[0].Preview[1], "+++ ") {
+		t.Fatalf("expected unified diff headers, got %v", events[0].Preview[:2])
+	}
+	if events[0].Preview[2] != "@@" {
+		t.Fatalf("expected diff hunk marker, got %q", events[0].Preview[2])
 	}
 }
 

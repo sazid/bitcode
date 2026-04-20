@@ -60,12 +60,12 @@ func (s *Spinner) Stop() {
 	<-s.done
 }
 
-// eventBullet returns a bullet in the primary color, or red for errors.
+// eventBullet returns a muted bullet for normal events, or red for errors.
 func eventBullet(t *Theme, isError bool) string {
 	if isError {
 		return t.ANSI(t.Error) + "●" + t.ANSIReset()
 	}
-	return t.ANSI(t.Primary) + "●" + t.ANSIReset()
+	return t.ANSIDim() + "●" + t.ANSIReset()
 }
 
 func renderEvent(w io.Writer, t *Theme, e internal.Event) {
@@ -143,8 +143,8 @@ func renderFileEvent(w io.Writer, t *Theme, e internal.Event) {
 	}
 	renderEventHeader(w, t, e, title)
 	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
-	if len(lines) == 0 && shouldRenderEventMessage(e) {
-		lines = append(lines, e.Message)
+	if shouldRenderEventMessage(e) {
+		lines = append([]string{t.ANSIDim() + e.Message + t.ANSIReset()}, lines...)
 	}
 	renderEventLines(w, lines...)
 }
@@ -169,7 +169,11 @@ func renderTodoEvent(w io.Writer, t *Theme, e internal.Event, action string) {
 
 func renderEventHeader(w io.Writer, t *Theme, e internal.Event, title string) {
 	timestamp := fmt.Sprintf("%s[%s]%s", t.ANSIDim(), time.Now().Format("15:04:05"), t.ANSIReset())
-	fmt.Fprintf(w, "\n%s %s %s\n", eventBullet(t, e.IsError), timestamp, title)
+	titleText := t.ANSIDim() + title + t.ANSIReset()
+	if e.IsError {
+		titleText = t.ANSI(t.Error) + title + t.ANSIReset()
+	}
+	fmt.Fprintf(w, "\n%s %s %s\n", eventBullet(t, e.IsError), timestamp, titleText)
 }
 
 func renderEventLines(w io.Writer, lines ...string) {
@@ -254,12 +258,16 @@ func shouldRenderEventMessage(e internal.Event) bool {
 func renderPreviewLine(t *Theme, pt internal.PreviewType, line string) string {
 	switch pt {
 	case internal.PreviewDiff:
-		if strings.HasPrefix(line, "+") {
-			return t.ANSI(t.Success) + line + t.ANSIReset()
-		} else if strings.HasPrefix(line, "-") {
-			return t.ANSI(t.Error) + line + t.ANSIReset()
+		switch {
+		case strings.HasPrefix(line, "@@"), strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "), line == "...":
+			return t.ANSIDim() + line + t.ANSIReset()
+		case strings.HasPrefix(line, "+"):
+			return t.ANSIDim() + t.ANSI(t.Success) + line + t.ANSIReset()
+		case strings.HasPrefix(line, "-"):
+			return t.ANSIDim() + t.ANSI(t.Error) + line + t.ANSIReset()
+		default:
+			return t.ANSIDim() + line + t.ANSIReset()
 		}
-		return line
 	case internal.PreviewBash:
 		if strings.HasPrefix(line, "stderr:") {
 			return t.ANSI(t.Error) + strings.TrimPrefix(line, "stderr:") + t.ANSIReset()
@@ -268,7 +276,7 @@ func renderPreviewLine(t *Theme, pt internal.PreviewType, line string) string {
 	case internal.PreviewCode:
 		return t.ANSIDim() + line + t.ANSIReset()
 	case internal.PreviewFileList:
-		return t.ANSI(t.Primary) + line + t.ANSIReset()
+		return t.ANSIDim() + line + t.ANSIReset()
 	default:
 		return line
 	}
