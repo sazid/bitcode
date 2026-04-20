@@ -25,6 +25,11 @@ type agentDoneMsg struct{}
 type agentStartMsg struct{ cancel context.CancelFunc }
 type spinnerTickMsg time.Time
 type appendOutputMsg string
+type promptEchoMsg struct{ text string }
+type toolEventMsg struct {
+	text string
+	name string
+}
 type flushOutputMsg struct{}
 type permRequestMsg struct {
 	toolName   string
@@ -99,6 +104,8 @@ type SessionState struct {
 	Quitting      bool            `json:"quitting"`
 	TaskID        string          `json:"task_id"`
 	TurnCount     int             `json:"turn_count"`
+	ToolCallCount int             `json:"tool_call_count"`
+	LastToolName  string          `json:"last_tool_name,omitempty"`
 	Status        sessionStatus   `json:"status,omitempty"`
 }
 
@@ -179,6 +186,9 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentStartMsg:
 		m.runtime.agentCancel = msg.cancel
 		m.state.Phase = sessionAgentRunning
+		m.state.TurnCount = 0
+		m.state.ToolCallCount = 0
+		m.state.LastToolName = ""
 		m.runtime.agentStartedAt = time.Now()
 		m.runtime.input.Blur()
 		return m, nil
@@ -214,6 +224,26 @@ func (m sessionModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case appendOutputMsg:
 		m.state.OutputQueue = append(m.state.OutputQueue, string(msg))
+		if !m.runtime.flushing {
+			m.runtime.flushing = true
+			return m, func() tea.Msg { return flushOutputMsg{} }
+		}
+		return m, nil
+
+	case promptEchoMsg:
+		m.state.OutputQueue = append(m.state.OutputQueue, m.renderPromptEcho(msg.text))
+		if !m.runtime.flushing {
+			m.runtime.flushing = true
+			return m, func() tea.Msg { return flushOutputMsg{} }
+		}
+		return m, nil
+
+	case toolEventMsg:
+		if msg.name != "" {
+			m.state.ToolCallCount++
+			m.state.LastToolName = summarizeToolName(msg.name)
+		}
+		m.state.OutputQueue = append(m.state.OutputQueue, msg.text)
 		if !m.runtime.flushing {
 			m.runtime.flushing = true
 			return m, func() tea.Msg { return flushOutputMsg{} }
@@ -339,34 +369,22 @@ func (m sessionModel) View() string {
 		return ""
 	}
 
-	t := m.runtime.themes.Active()
-	var sb strings.Builder
-
 	if m.state.Phase == sessionPermissionPrompt {
 		return m.renderPermissionPrompt()
 	}
 
 	if m.state.SpinnerActive {
-		frame := tuiSpinnerFrames[m.state.SpinnerFrame%len(tuiSpinnerFrames)]
-		elapsed := ""
-		if !m.runtime.agentStartedAt.IsZero() {
-			elapsed = fmt.Sprintf(" %s(%s)%s", t.ANSIDim(), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset())
-		}
-		fmt.Fprint(&sb, m.renderStatusBar())
-		fmt.Fprintf(&sb, "\n  %s%s%s %sWorking…%s%s",
-			t.ANSIDim(), frame, t.ANSIReset(),
-			t.ANSIDim(), t.ANSIReset(),
-			elapsed,
-		)
-		return sb.String()
+		return m.renderSpinnerLine()
 	}
 
-	fmt.Fprint(&sb, m.renderStatusBar())
-	fmt.Fprintf(&sb, "\n%s", m.runtime.input.View())
-	return sb.String()
+	return m.renderPromptComposer()
 }
 
-func (m sessionModel) renderStatusBar() string {
+func (m sessionModel) renderPromptComposer() string {
+	return m.renderPromptInfoBar() + "\n" + m.runtime.input.View()
+}
+
+func (m sessionModel) renderPromptInfoBar() string {
 	t := m.runtime.themes.Active()
 	width := m.state.Width
 	if width <= 0 {
@@ -382,18 +400,11 @@ func (m sessionModel) renderStatusBar() string {
 	}
 	left := strings.Join(leftParts, "  ")
 
-	rightParts := make([]string, 0, 2)
-	modelLabel := strings.TrimSpace(m.state.Status.Model)
-	if modelLabel != "" {
-		rightParts = append(rightParts, t.ANSI(t.Info)+modelLabel+t.ANSIReset())
-	}
-	if reasoning := strings.TrimSpace(m.state.Status.Reasoning); reasoning != "" {
-		rightParts = append(rightParts, t.ANSIDim()+strings.ToUpper(reasoning)+t.ANSIReset())
+	rightParts := []string{t.ANSI(t.Primary) + "󱙺 BITCODE" + t.ANSIReset()}
+	if modelLabel := strings.TrimSpace(m.state.Status.Model); modelLabel != "" {
+		rightParts = append(rightParts, t.ANSI(t.Info)+" "+modelLabel+t.ANSIReset())
 	}
 	right := strings.Join(rightParts, "  ")
-	if right == "" {
-		right = t.ANSIDim() + "BitCode" + t.ANSIReset()
-	}
 
 	plainLeft := plainText(left)
 	plainRight := plainText(right)
@@ -403,6 +414,55 @@ func (m sessionModel) renderStatusBar() string {
 	}
 
 	return " " + left + strings.Repeat(" ", gap) + right
+}
+
+func (m sessionModel) renderPromptEcho(text string) string {
+	t := m.runtime.themes.Active()
+	userMsgStyle := lipgloss.NewStyle().Foreground(t.Info)
+	return m.renderPromptInfoBar() + "\n" + userMsgStyle.Render("> "+text)
+}
+
+func (m sessionModel) renderSpinnerLine() string {
+	t := m.runtime.themes.Active()
+	frame := tuiSpinnerFrames[m.state.SpinnerFrame%len(tuiSpinnerFrames)]
+	parts := []string{fmt.Sprintf("%s%s%s %sWorking…%s", t.ANSIDim(), frame, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())}
+	if !m.runtime.agentStartedAt.IsZero() {
+		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Info), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset()))
+	}
+	if m.state.ToolCallCount > 0 {
+		label := "tool calls"
+		if m.state.ToolCallCount == 1 {
+			label = "tool call"
+		}
+		parts = append(parts, fmt.Sprintf("%s%d %s%s", t.ANSI(t.Secondary), m.state.ToolCallCount, label, t.ANSIReset()))
+	}
+	if m.state.TurnCount > 0 {
+		label := "turns"
+		if m.state.TurnCount == 1 {
+			label = "turn"
+		}
+		parts = append(parts, fmt.Sprintf("%s%d %s%s", t.ANSI(t.Warning), m.state.TurnCount, label, t.ANSIReset()))
+	}
+	if last := strings.TrimSpace(m.state.LastToolName); last != "" {
+		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Primary), compactStatusLabel(last, 28), t.ANSIReset()))
+	}
+	return "  " + strings.Join(parts, fmt.Sprintf(" %s·%s ", t.ANSIDim(), t.ANSIReset()))
+}
+
+func compactStatusLabel(value string, max int) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if max <= 0 || len(runes) <= max {
+		return value
+	}
+	if max <= 1 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "…"
+}
+
+func summarizeToolName(name string) string {
+	return strings.TrimSpace(name)
 }
 
 func plainText(s string) string {
@@ -470,7 +530,7 @@ func sessionCallbacks(p *tea.Program, themes *ThemeRegistry) AgentCallbacks {
 			renderEvent(&buf, themes.Active(), e)
 			text := strings.TrimRight(buf.String(), "\n")
 			if text != "" {
-				p.Send(appendOutputMsg(text))
+				p.Send(toolEventMsg{text: text, name: e.Name})
 			}
 		},
 		OnError: func(err error) {
@@ -527,8 +587,8 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, themes *ThemeRegistry,
 			}
 
 			ut := themes.Active()
-			userMsgStyle := lipgloss.NewStyle().Foreground(ut.Info)
-			p.Send(appendOutputMsg("\n" + userMsgStyle.Render("> "+text)))
+			_ = ut
+			p.Send(promptEchoMsg{text: text})
 
 			if lifecycle.IsRunning() {
 				p.Send(appendOutputMsg(dimStyle().Render("  queued for agent")))
