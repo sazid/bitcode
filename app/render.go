@@ -48,7 +48,7 @@ func StartSpinner(w io.Writer, t *Theme) *Spinner {
 			case <-ticker.C:
 				glyph := spinnerFrames[frame%len(spinnerFrames)]
 				frame++
-				fmt.Fprintf(w, "\r\033[K  %s%s%s %sWorking…%s", t.ANSI(t.Primary), glyph, t.ANSIReset(), t.ANSIDim(), t.ANSIReset())
+				fmt.Fprintf(w, "\r\033[K  %s%s %sWorking…%s", t.ANSIDim(), glyph, t.ANSIDim(), t.ANSIReset())
 			}
 		}
 	}()
@@ -129,8 +129,8 @@ func renderShellEvent(w io.Writer, t *Theme, e internal.Event) {
 	lines := formatPreviewLines(t, e.PreviewType, e.Preview)
 	if e.IsError && e.Message != "" {
 		lines = append([]string{t.ANSI(t.Error) + e.Message + t.ANSIReset()}, lines...)
-	} else if len(lines) == 0 && shouldRenderEventMessage(e) {
-		lines = append(lines, e.Message)
+	} else if shouldRenderEventMessage(e) {
+		lines = append([]string{t.ANSIDim() + e.Message + t.ANSIReset()}, lines...)
 	}
 	renderEventLines(w, lines...)
 }

@@ -342,17 +342,16 @@ func (m sessionModel) View() string {
 		if !m.runtime.agentStartedAt.IsZero() {
 			elapsed = fmt.Sprintf(" %s(%s)%s", t.ANSIDim(), formatDuration(time.Since(m.runtime.agentStartedAt)), t.ANSIReset())
 		}
-		fmt.Fprintf(&sb, "  %s%s%s %sWorking…%s%s %s· Ctrl+C to interrupt%s",
-			t.ANSI(t.Primary), frame, t.ANSIReset(),
-			t.ANSIDim(), t.ANSIReset(),
+		fmt.Fprintf(&sb, "  %s%s Working…%s%s",
+			t.ANSIDim(), frame,
+			t.ANSIReset(),
 			elapsed,
-			t.ANSIDim(), t.ANSIReset(),
 		)
 		return sb.String()
 	}
 
 	fmt.Fprintf(&sb, "\n%s\n", m.runtime.input.View())
-	fmt.Fprintf(&sb, "%s  Enter submit · Esc clear · Ctrl+C interrupt/exit · Ctrl+D exit%s", t.ANSIDim(), t.ANSIReset())
+	fmt.Fprintf(&sb, "%s  Enter send · Esc clear · Ctrl+C interrupt/exit · Ctrl+D exit%s", t.ANSIDim(), t.ANSIReset())
 	return sb.String()
 }
 
@@ -366,17 +365,18 @@ func (m sessionModel) renderPermissionPrompt() string {
 		command = m.state.PermDecision.Command
 	}
 
-	fmt.Fprintf(&sb, "\n%sPermission required%s\n", t.ANSI(t.Warning), t.ANSIReset())
-	if reason != "" {
-		fmt.Fprintf(&sb, "  %s\n", reason)
-	}
+	title := "Permission"
 	if m.state.PermToolName != "" {
-		fmt.Fprintf(&sb, "  Tool: %s\n", m.state.PermToolName)
+		title = fmt.Sprintf("Permission %s", m.state.PermToolName)
+	}
+	fmt.Fprintf(&sb, "\n%s%s%s\n", t.ANSI(t.Warning), title, t.ANSIReset())
+	if reason != "" {
+		fmt.Fprintf(&sb, "  %s%s%s\n", t.ANSIDim(), reason, t.ANSIReset())
 	}
 	if command != "" {
 		fmt.Fprintf(&sb, "  %s$ %s%s\n", t.ANSIDim(), command, t.ANSIReset())
 	}
-	fmt.Fprintf(&sb, "\n  [%sy%s] Allow once  [%sa%s] Always allow  [%sn%s] Deny\n",
+	fmt.Fprintf(&sb, "\n  %s[y]%s once  %s[a]%s always  %s[n]%s deny\n",
 		t.ANSI(t.Success), t.ANSIReset(),
 		t.ANSI(t.Success), t.ANSIReset(),
 		t.ANSI(t.Error), t.ANSIReset(),
@@ -468,14 +468,11 @@ func runOrchestrator(p *tea.Program, config *AgentConfig, themes *ThemeRegistry,
 			}
 
 			ut := themes.Active()
-			userMsgStyle := lipgloss.NewStyle().
-				Background(ut.UserMsgBg).
-				Bold(true).
-				Foreground(ut.Primary)
-			p.Send(appendOutputMsg("\n" + userMsgStyle.Render(fmt.Sprintf(" > %s ", text))))
+			userMsgStyle := lipgloss.NewStyle().Foreground(ut.Info)
+			p.Send(appendOutputMsg("\n" + userMsgStyle.Render("› "+text)))
 
 			if lifecycle.IsRunning() {
-				p.Send(appendOutputMsg(dimStyle().Render("  (message will be delivered to the agent)")))
+				p.Send(appendOutputMsg(dimStyle().Render("  queued for agent")))
 				lifecycle.InjectMessage(text)
 			} else {
 				config.TaskTitle = text
