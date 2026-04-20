@@ -26,20 +26,24 @@ func (r *ReadTool) Name() string {
 }
 
 func (r *ReadTool) Description() string {
-	return `Reads a file from local filesystem.
+	return `Read a file from the local filesystem.
 
-  IMPORTANT:
-  - Supports both absolute and relative paths
-  - Relative paths are resolved from the current working directory
-  - This tool can read images (PNG, JPG, etc.), PDFs, and Jupyter notebooks
-  - For images, contents will be presented visually since this is a multimodal LLM
-  - This tool can only read files, not directories
-  - Returns content with line numbers starting from 1
+When to use this:
+- Use Read when you already know the file path and need to inspect its contents before editing or reasoning about code.
+- Prefer Read over shell commands like cat, head, or tail.
+- Use offset and limit for large files instead of reading everything at once.
 
-  Parameters:
-  - file_path (required): The path to the file (absolute or relative)
-  - offset (optional): The line number to start reading from (default: 0)
-  - limit (optional): The number of lines to read (default: read entire file)`
+Important:
+- Supports both absolute and relative paths.
+- Relative paths are resolved from the current working directory.
+- Can read images, PDFs, and notebooks.
+- Reads files only, not directories.
+- Returns content with line numbers starting from 1.
+
+Parameters:
+- file_path (required): Path to the file.
+- offset (optional): Zero-based starting line.
+- limit (optional): Number of lines to read.`
 }
 
 func (r *ReadTool) ParametersSchema() map[string]any {

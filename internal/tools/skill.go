@@ -29,24 +29,21 @@ func (t *SkillTool) Name() string {
 }
 
 func (t *SkillTool) Description() string {
-	return `Execute a skill (user-defined prompt template) by name.
+	return `Execute a named skill by loading its reusable prompt instructions.
 
-Skills are markdown-based prompt templates that users define to encapsulate
-reusable workflows. When a user types "/<skill-name>" (e.g., "/commit", "/review"),
-they are referring to a skill. Use this tool to invoke it.
-
-How to invoke:
-- Use this tool with the skill name and optional arguments
-- Examples:
-  - skill: "commit" - invoke the commit skill
-  - skill: "commit", args: "-m 'Fix bug'" - invoke with arguments
-  - skill: "git:commit" - invoke a namespaced skill (from a subdirectory)
+When to use this:
+- Use Skill when the user's request matches a skill listed in the system prompt.
+- Invoke the skill before doing manual work when the skill is designed for that workflow.
+- Use args when the skill expects additional user input.
 
 Important:
-- Available skills are listed in the system prompt under "Available Skills"
-- When a skill matches the user's request, invoke it BEFORE generating other responses
-- Do not invoke a skill that does not exist - check the available skills list first
-- If a skill has a trigger condition, invoke it automatically when the condition is met`
+- Check the available skills list first and do not invoke missing skills.
+- Skills may be namespaced, such as "git:commit".
+- If a skill has a trigger condition, invoke it automatically when the condition is met.
+
+Parameters:
+- skill (required): Skill name.
+- args (optional): Extra input passed to the skill template.`
 }
 
 func (t *SkillTool) ParametersSchema() map[string]any {

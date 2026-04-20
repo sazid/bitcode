@@ -25,18 +25,22 @@ func (w *WriteTool) Name() string {
 }
 
 func (w *WriteTool) Description() string {
-	return `Writes content to a file on the local filesystem, creating it if it does not exist
-or overwriting it if it does.
+	return `Write content to a file, creating or replacing it.
 
-  IMPORTANT:
-  - Supports both absolute and relative paths
-  - Relative paths are resolved from the current working directory
-  - Parent directories are created automatically if they do not exist
-  - This tool can only write files, not directories
+When to use this:
+- Use Write when you need to create a new file or replace the full contents of a file.
+- Prefer Edit for smaller in-place changes to existing files.
+- Avoid Write when a targeted patch would be safer or easier to review.
 
-  Parameters:
-  - file_path (required): The path to the file (absolute or relative)
-  - content (required): The content to write to the file`
+Important:
+- Supports both absolute and relative paths.
+- Relative paths are resolved from the current working directory.
+- Parent directories are created automatically if needed.
+- Writes files only, not directories.
+
+Parameters:
+- file_path (required): Path to the file.
+- content (required): Full file contents to write.`
 }
 
 func (w *WriteTool) ParametersSchema() map[string]any {

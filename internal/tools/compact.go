@@ -53,18 +53,18 @@ func (t *CompactTool) Name() string { return "Compact" }
 func (t *CompactTool) Description() string {
 	return `Compact the conversation history by replacing it with a summary.
 
-Use this when the conversation is getting long and you need to free up context space.
-Provide a comprehensive summary that captures everything needed to continue working.
+When to use this:
+- Use Compact when the conversation is getting long and you need to preserve key context before it is lost.
+- Use it proactively instead of continuing with a degraded or overly large transcript.
+- Include open tasks, touched files, decisions, and verification state in the summary.
 
-The compaction is applied at the start of the next turn — the full message history
-will be replaced with the system prompt plus your summary.
+Important:
+- The compaction is applied at the start of the next turn.
+- The full conversation history will be replaced with the system prompt plus your summary.
+- Keep the summary comprehensive enough to continue work without the original transcript.
 
-Your summary should include:
-- The user's original request and goals
-- What work has been completed (files read, created, modified)
-- Key decisions, trade-offs, or constraints discovered
-- Current state and what remains to be done
-- Any errors encountered and how they were resolved`
+Parameters:
+- summary (required): Comprehensive continuation summary for the next turn.`
 }
 
 func (t *CompactTool) ParametersSchema() map[string]any {

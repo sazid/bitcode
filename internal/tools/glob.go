@@ -25,17 +25,22 @@ func (g *GlobTool) Name() string {
 }
 
 func (g *GlobTool) Description() string {
-	return `Fast file pattern matching tool that finds files by name patterns.
+	return `Find files by path pattern.
 
-  IMPORTANT:
-  - Supports glob patterns like "**/*.go" or "src/**/*.ts"
-  - path sets the directory to search in (default: current working directory)
-  - Returns matching file paths sorted by modification time (most recent first)
-  - Use this tool to find files by name — use ripgrep (if available, otherwise grep or other tools) to search file contents
+When to use this:
+- Use Glob to discover candidate files or directories when you do not know the exact path yet.
+- Prefer Glob over shell commands like find or ls for file discovery.
+- Use Read after Glob once you know the exact file you want to inspect.
 
-  Parameters:
-  - pattern (required): The glob pattern to match files against (e.g. "**/*.go", "*.md")
-  - path (optional): Directory to search in (absolute or relative). Defaults to current working directory`
+Important:
+- Supports glob patterns like "**/*.go" and "src/**/*.ts".
+- path sets the directory to search in and defaults to the current working directory.
+- Returns matching file paths sorted by modification time, newest first.
+- Searches file paths, not file contents.
+
+Parameters:
+- pattern (required): Glob pattern to match.
+- path (optional): Directory to search from.`
 }
 
 func (g *GlobTool) ParametersSchema() map[string]any {

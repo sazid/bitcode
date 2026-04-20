@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/sazid/bitcode/internal"
 )
@@ -28,6 +29,15 @@ type Tool interface {
 	Execute(input json.RawMessage, eventsCh chan<- internal.Event) (ToolResult, error)
 }
 
+func IsParallelReadOnlyTool(name string) bool {
+	switch name {
+	case "Read", "Glob", "LineCount", "FileSize", "TodoRead", "Skill", "WebSearch":
+		return true
+	default:
+		return false
+	}
+}
+
 func NewManager() *Manager {
 	return &Manager{
 		tools: make(map[string]Tool),
@@ -48,6 +58,10 @@ func (m *Manager) List() []Tool {
 	for _, tool := range m.tools {
 		result = append(result, tool)
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name() < result[j].Name()
+	})
 
 	return result
 }

@@ -27,20 +27,26 @@ func (e *EditTool) Name() string {
 }
 
 func (e *EditTool) Description() string {
-	return `Performs exact string replacement in a file.
+	return `Apply an exact string replacement to an existing file.
 
-  IMPORTANT:
-  - Supports both absolute and relative paths
-  - Relative paths are resolved from the current working directory
-  - old_string must match the file content exactly (including whitespace and indentation)
-  - The edit will fail if old_string is not found in the file
-  - By default only the first occurrence is replaced; set replace_all to true to replace every occurrence
+When to use this:
+- Use Edit for targeted updates when you know the current text exactly.
+- Prefer Edit over shell-based text mutation commands.
+- Use Read first so you can copy the exact old_string, including whitespace.
+- Use replace_all only when every match should change the same way.
 
-  Parameters:
-  - file_path (required): The path to the file (absolute or relative)
-  - old_string (required): The exact text to find and replace
-  - new_string (required): The text to replace it with
-  - replace_all (optional): Replace all occurrences instead of just the first (default: false)`
+Important:
+- Supports both absolute and relative paths.
+- Relative paths are resolved from the current working directory.
+- old_string must match the file content exactly, including indentation and whitespace.
+- The edit fails if old_string is not found.
+- By default only the first occurrence is replaced.
+
+Parameters:
+- file_path (required): Path to the file.
+- old_string (required): Exact text to replace.
+- new_string (required): Replacement text.
+- replace_all (optional): Replace every occurrence instead of the first.`
 }
 
 func (e *EditTool) ParametersSchema() map[string]any {

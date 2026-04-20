@@ -29,16 +29,22 @@ func (w *WebSearchTool) Name() string {
 }
 
 func (w *WebSearchTool) Description() string {
-	return `Searches the web and returns results to inform responses.
+	return `Search the web for up-to-date external information.
 
-- Provides up-to-date information for current events and recent data
-- Returns search results with titles, URLs, and descriptions
-- Use this tool for accessing information beyond the model's knowledge cutoff
+When to use this:
+- Use WebSearch when the answer depends on current facts, recent releases, or online documentation outside the repository.
+- Prefer this over guessing when the model may be past its knowledge cutoff.
+- Use domain filters when you want to include or exclude specific websites.
 
-Usage notes:
-- Domain filtering is supported to include or block specific websites
-- Requires BRAVE_API_KEY environment variable to be set
-- After answering the user's question using search results, include a "Sources:" section listing relevant URLs`
+Important:
+- Requires the BRAVE_API_KEY environment variable.
+- Returns titles, URLs, and descriptions for matching results.
+- After using search results in your answer, include a Sources section with the relevant URLs.
+
+Parameters:
+- query (required): Search query.
+- allowed_domains (optional): Restrict results to these domains.
+- blocked_domains (optional): Exclude these domains.`
 }
 
 func (w *WebSearchTool) ParametersSchema() map[string]any {

@@ -54,6 +54,20 @@ func (t *mockTool) Execute(_ json.RawMessage, _ chan<- internal.Event) (tools.To
 	return tools.ToolResult{Content: t.result}, nil
 }
 
+type slowMockTool struct {
+	name   string
+	result string
+	wait   chan struct{}
+}
+
+func (t *slowMockTool) Name() string                     { return t.name }
+func (t *slowMockTool) Description() string              { return "mock " + t.name }
+func (t *slowMockTool) ParametersSchema() map[string]any { return map[string]any{"type": "object"} }
+func (t *slowMockTool) Execute(_ json.RawMessage, _ chan<- internal.Event) (tools.ToolResult, error) {
+	<-t.wait
+	return tools.ToolResult{Content: t.result}, nil
+}
+
 func TestRunnerStopResponse(t *testing.T) {
 	provider := &mockProvider{
 		responses: []llm.CompletionResponse{
@@ -421,6 +435,78 @@ func TestRunnerToolFailureReturnsReflectionMessage(t *testing.T) {
 	}
 	if want := "Reflect on why this failed"; !contains(toolMsg, want) {
 		t.Fatalf("expected tool message to contain %q, got %q", want, toolMsg)
+	}
+}
+
+func TestRunnerParallelizesContiguousReadOnlyToolCalls(t *testing.T) {
+	provider := &mockProvider{
+		responses: []llm.CompletionResponse{
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Inspecting files."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc1", Name: "Read", Arguments: `{"file_path":"a.go"}`},
+						{ID: "tc2", Name: "Glob", Arguments: `{"pattern":"**/*.go"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "Done."),
+				FinishReason: llm.FinishStop,
+			},
+		},
+	}
+
+	wait := make(chan struct{})
+	mgr := tools.NewManager()
+	mgr.Register(&slowMockTool{name: "Read", result: "read result", wait: wait})
+	mgr.Register(&slowMockTool{name: "Glob", result: "glob result", wait: wait})
+
+	cfg := &Config{
+		Provider: provider,
+		Tools:    mgr,
+		MaxTurns: 4,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	resultCh := make(chan struct {
+		result *Result
+		err    error
+	}, 1)
+	go func() {
+		result, err := runner.Run(context.Background(), []llm.Message{
+			llm.TextMessage(llm.RoleUser, "Inspect the repo"),
+		})
+		resultCh <- struct {
+			result *Result
+			err    error
+		}{result: result, err: err}
+	}()
+
+	select {
+	case outcome := <-resultCh:
+		t.Fatalf("runner returned before tools were released: %+v", outcome)
+	default:
+	}
+
+	close(wait)
+	outcome := <-resultCh
+	if outcome.err != nil {
+		t.Fatalf("unexpected error: %v", outcome.err)
+	}
+	if outcome.result.Output != "Done." {
+		t.Fatalf("unexpected final output: %q", outcome.result.Output)
+	}
+	if len(outcome.result.Messages) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(outcome.result.Messages))
+	}
+	if got := outcome.result.Messages[2].Text(); got != "read result" {
+		t.Fatalf("expected first tool result to preserve order, got %q", got)
+	}
+	if got := outcome.result.Messages[3].Text(); got != "glob result" {
+		t.Fatalf("expected second tool result to preserve order, got %q", got)
 	}
 }
 

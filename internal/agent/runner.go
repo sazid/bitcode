@@ -265,15 +265,42 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 				}
 			}
 
-			// Execute regular tools sequentially
-			for _, tc := range regularCalls {
+			// Execute regular tools, batching contiguous safe read-only calls in parallel.
+			for i := 0; i < len(regularCalls); {
 				if ctx.Err() != nil {
 					return r.buildResult(messages, totalUsage), ctx.Err()
 				}
-				toolMsg := r.executeToolCall(ctx, tc, eventsCh)
-				messages = append(messages, toolMsg)
-				persistMessage(cfg.ConvManager, cfg.ConvID, toolMsg)
+
+				if !tools.IsParallelReadOnlyTool(regularCalls[i].Name) || cfg.Guard != nil {
+					toolMsg := r.executeToolCall(ctx, regularCalls[i], eventsCh)
+					messages = append(messages, toolMsg)
+					persistMessage(cfg.ConvManager, cfg.ConvID, toolMsg)
+					drainInjectedMessages(cfg, &messages)
+					i++
+					continue
+				}
+
+				j := i
+				for j < len(regularCalls) && tools.IsParallelReadOnlyTool(regularCalls[j].Name) {
+					j++
+				}
+
+				if j-i == 1 {
+					toolMsg := r.executeToolCall(ctx, regularCalls[i], eventsCh)
+					messages = append(messages, toolMsg)
+					persistMessage(cfg.ConvManager, cfg.ConvID, toolMsg)
+					drainInjectedMessages(cfg, &messages)
+					i = j
+					continue
+				}
+
+				toolMsgs := r.executeToolCallsParallel(ctx, regularCalls[i:j], eventsCh)
+				for _, toolMsg := range toolMsgs {
+					messages = append(messages, toolMsg)
+					persistMessage(cfg.ConvManager, cfg.ConvID, toolMsg)
+				}
 				drainInjectedMessages(cfg, &messages)
+				i = j
 			}
 
 			// Execute Agent tool calls concurrently
@@ -402,6 +429,40 @@ func buildIncompleteTodosReminder(todos []tools.TodoItem) string {
 
 func buildToolFailureMessage(tc llm.ToolCall, err error) string {
 	return fmt.Sprintf("Tool call failed for %s.\nArguments: %s\nError: %v\nReflect on why this failed, fix the tool call, and try again if the task still requires it.", tc.Name, tc.Arguments, err)
+}
+
+// executeToolCallsParallel runs multiple safe regular tool calls concurrently
+// and returns the result messages in the original order.
+func (r *Runner) executeToolCallsParallel(ctx context.Context, calls []llm.ToolCall, eventsCh chan<- internal.Event) []llm.Message {
+	results := make([]llm.Message, len(calls))
+	eventBatches := make([][]internal.Event, len(calls))
+	var wg sync.WaitGroup
+	wg.Add(len(calls))
+
+	for i, tc := range calls {
+		go func(idx int, tc llm.ToolCall) {
+			defer wg.Done()
+			localEvents := make(chan internal.Event, 16)
+			localDone := make(chan struct{})
+			go func() {
+				defer close(localDone)
+				for evt := range localEvents {
+					eventBatches[idx] = append(eventBatches[idx], evt)
+				}
+			}()
+			results[idx] = r.executeToolCall(ctx, tc, localEvents)
+			close(localEvents)
+			<-localDone
+		}(i, tc)
+	}
+
+	wg.Wait()
+	for _, batch := range eventBatches {
+		for _, evt := range batch {
+			eventsCh <- evt
+		}
+	}
+	return results
 }
 
 // executeAgentCallsParallel runs multiple Agent tool calls concurrently

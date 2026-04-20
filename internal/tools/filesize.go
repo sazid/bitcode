@@ -24,16 +24,20 @@ func (f *FileSizeTool) Name() string {
 }
 
 func (f *FileSizeTool) Description() string {
-	return `Gets the size of a file in bytes.
+	return `Get the size of a file in bytes.
 
-IMPORTANT:
-- Use this tool BEFORE reading files to assess their size and avoid wasting context.
+When to use this:
+- Use FileSize before reading a file when you need to judge whether it is safe to load into context.
+- Pair it with LineCount to triage large files before choosing a read strategy.
+- Prefer this over using shell commands for quick size checks.
+
+Important:
 - Supports both absolute and relative paths.
-- Returns size in bytes and human-readable format (KB, MB, GB).
-- This tool can only get file sizes, not directory sizes.
+- Returns both raw bytes and a human-readable size.
+- Works on files, not directories.
 
 Parameters:
-- file_path (required): The path to the file (absolute or relative to current working directory)`
+- file_path (required): Path to the file.`
 }
 
 func (f *FileSizeTool) ParametersSchema() map[string]any {

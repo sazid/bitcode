@@ -27,16 +27,20 @@ func (l *LineCountTool) Name() string {
 }
 
 func (l *LineCountTool) Description() string {
-	return `Counts the number of lines in a file efficiently.
+	return `Count lines in a file efficiently.
 
-IMPORTANT:
-- Use this tool BEFORE reading files to assess their size and avoid wasting context.
-- This tool is highly optimized for speed using SIMD instructions (AVX2/SSE on x86, NEON on ARM).
+When to use this:
+- Use LineCount before reading a large file so you can choose a sensible offset and limit.
+- Pair it with FileSize when triaging very large files.
+- Prefer this over reading an entire file just to estimate its size.
+
+Important:
 - Supports both absolute and relative paths.
-- Returns line count and file path.
+- Returns the line count and file path.
+- Optimized for large files.
 
 Parameters:
-- file_path (required): The path to the file (absolute or relative to current working directory)`
+- file_path (required): Path to the file.`
 }
 
 func (l *LineCountTool) ParametersSchema() map[string]any {

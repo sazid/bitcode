@@ -3,17 +3,20 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/sazid/bitcode/internal/agent"
+	"github.com/sazid/bitcode/internal/skills"
 	"github.com/sazid/bitcode/internal/tools"
 )
 
-func buildSystemPrompt(agentRegistry *agent.Registry) string {
+func buildSystemPrompt(agentRegistry *agent.Registry, toolRegistry tools.ToolRegistry, skillManager skills.SkillProvider, instructionFiles []string) string {
 	wd, _ := os.Getwd()
 
 	si := tools.GetShellInfo()
@@ -149,11 +152,11 @@ Use TodoWrite for non-trivial tasks and whenever work spans multiple meaningful 
 	fmt.Fprintf(&sb, " - OS Version: %s\n", osVersion)
 	fmt.Fprintf(&sb, " - Current date and time: %s\n", dateTime)
 
-	// Skills and instruction files are NOT listed here — they are injected
-	// via the reminder system (oneshot for skills, periodic for instruction files)
-	// to avoid duplication and save tokens on every turn.
+	sb.WriteString(buildToolContextSection(toolRegistry))
+	sb.WriteString(buildSkillSection(skillManager))
+	sb.WriteString(buildInstructionFilesSection(instructionFiles))
+	sb.WriteString(buildWorkspaceSection(wd, isGitRepo))
 
-	// Add agent descriptions if registry provided
 	if agentRegistry != nil {
 		sb.WriteString(buildAgentSection(agentRegistry))
 	}
@@ -182,4 +185,195 @@ func buildAgentSection(registry *agent.Registry) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func buildToolContextSection(toolRegistry tools.ToolRegistry) string {
+	if toolRegistry == nil {
+		return ""
+	}
+	defs := toolRegistry.ToolDefinitions()
+	if len(defs) == 0 {
+		return ""
+	}
+
+	toolNames := make([]string, 0, len(defs))
+	parallelNames := make([]string, 0, len(defs))
+	for _, def := range defs {
+		toolNames = append(toolNames, def.Name)
+		if tools.IsParallelReadOnlyTool(def.Name) {
+			parallelNames = append(parallelNames, def.Name)
+		}
+	}
+	sort.Strings(toolNames)
+	sort.Strings(parallelNames)
+
+	var sb strings.Builder
+	sb.WriteString("\n# Tooling Context\n")
+	fmt.Fprintf(&sb, " - Available tools (%d): %s\n", len(toolNames), strings.Join(toolNames, ", "))
+	if len(parallelNames) > 0 {
+		fmt.Fprintf(&sb, " - Independent read-only tools that can be batched together: %s\n", strings.Join(parallelNames, ", "))
+	}
+	return sb.String()
+}
+
+func buildSkillSection(skillManager skills.SkillProvider) string {
+	if skillManager == nil {
+		return ""
+	}
+	skillList := skillManager.List()
+	if len(skillList) == 0 {
+		return ""
+	}
+	sort.Slice(skillList, func(i, j int) bool {
+		return skillList[i].Name < skillList[j].Name
+	})
+
+	var items []string
+	for _, skill := range skillList {
+		item := skill.Name
+		if skill.Description != "" {
+			item += ": " + skill.Description
+		}
+		items = append(items, item)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n# Available Skills\n")
+	for _, item := range limitItems(items, 10) {
+		fmt.Fprintf(&sb, " - %s\n", item)
+	}
+	if len(items) > 10 {
+		fmt.Fprintf(&sb, " - ... and %d more\n", len(items)-10)
+	}
+	return sb.String()
+}
+
+func buildInstructionFilesSection(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	copied := append([]string(nil), files...)
+	sort.Strings(copied)
+
+	var sb strings.Builder
+	sb.WriteString("\n# Instruction Files\n")
+	for _, file := range limitItems(copied, 8) {
+		fmt.Fprintf(&sb, " - %s\n", file)
+	}
+	if len(copied) > 8 {
+		fmt.Fprintf(&sb, " - ... and %d more\n", len(copied)-8)
+	}
+	return sb.String()
+}
+
+func buildWorkspaceSection(wd string, isGitRepo bool) string {
+	var sb strings.Builder
+	sb.WriteString("\n# Workspace Snapshot\n")
+
+	if isGitRepo {
+		roots, extCounts, fileCount := trackedWorkspaceStats(wd)
+		if fileCount > 0 {
+			fmt.Fprintf(&sb, " - Tracked files: %d\n", fileCount)
+			if len(roots) > 0 {
+				fmt.Fprintf(&sb, " - Top-level tracked paths: %s\n", strings.Join(limitItems(roots, 12), ", "))
+			}
+			if extSummary := formatExtensionSummary(extCounts, 8); extSummary != "" {
+				fmt.Fprintf(&sb, " - Common tracked extensions: %s\n", extSummary)
+			}
+			return sb.String()
+		}
+	}
+
+	entries, err := os.ReadDir(wd)
+	if err != nil {
+		return ""
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			name += "/"
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		fmt.Fprintf(&sb, " - Top-level paths: %s\n", strings.Join(limitItems(names, 12), ", "))
+	}
+	return sb.String()
+}
+
+func trackedWorkspaceStats(wd string) ([]string, map[string]int, int) {
+	cmd := exec.Command("git", "ls-files")
+	cmd.Dir = wd
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil, 0
+	}
+
+	rootSet := map[string]struct{}{}
+	extCounts := map[string]int{}
+	fileCount := 0
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fileCount++
+		parts := strings.Split(line, "/")
+		root := parts[0]
+		if len(parts) > 1 {
+			root += "/"
+		}
+		rootSet[root] = struct{}{}
+
+		ext := filepath.Ext(line)
+		if ext == "" {
+			ext = "(no ext)"
+		}
+		extCounts[ext]++
+	}
+
+	roots := make([]string, 0, len(rootSet))
+	for root := range rootSet {
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	return roots, extCounts, fileCount
+}
+
+func formatExtensionSummary(extCounts map[string]int, limit int) string {
+	if len(extCounts) == 0 {
+		return ""
+	}
+	type extCount struct {
+		name  string
+		count int
+	}
+	items := make([]extCount, 0, len(extCounts))
+	for name, count := range extCounts {
+		items = append(items, extCount{name: name, count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].name < items[j].name
+		}
+		return items[i].count > items[j].count
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%s (%d)", item.name, item.count))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func limitItems[T any](items []T, limit int) []T {
+	if len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }
