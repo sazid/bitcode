@@ -188,6 +188,9 @@ func TestFork(t *testing.T) {
 	if len(forked.Messages) != 2 {
 		t.Errorf("expected 2 messages in fork, got %d", len(forked.Messages))
 	}
+	if forked.WorkDir != conv.WorkDir {
+		t.Errorf("expected forked work dir %q, got %q", conv.WorkDir, forked.WorkDir)
+	}
 	if forked.Messages[0].Text() != "First" {
 		t.Errorf("expected first message 'First', got %q", forked.Messages[0].Text())
 	}
@@ -202,6 +205,38 @@ func TestFork(t *testing.T) {
 	}
 	if len(original.Messages) != 3 {
 		t.Errorf("original should still have 3 messages, got %d", len(original.Messages))
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewManager(tmpDir, "/test")
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	conv, _ := mgr.Create("Original")
+	mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleUser, "First"))
+	mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleAssistant, "Second"))
+	mgr.AppendMessage(conv.ID, llm.TextMessage(llm.RoleUser, "Third"))
+
+	trimmed, err := mgr.Truncate(conv.ID, 2)
+	if err != nil {
+		t.Fatalf("Truncate: %v", err)
+	}
+	if len(trimmed.Messages) != 2 {
+		t.Fatalf("expected 2 messages after truncate, got %d", len(trimmed.Messages))
+	}
+	if trimmed.Messages[1].Text() != "Second" {
+		t.Fatalf("expected last remaining message to be Second, got %q", trimmed.Messages[1].Text())
+	}
+
+	loaded, err := mgr.Load(conv.ID)
+	if err != nil {
+		t.Fatalf("Load after truncate: %v", err)
+	}
+	if len(loaded.Messages) != 2 {
+		t.Fatalf("expected persisted conversation to have 2 messages, got %d", len(loaded.Messages))
 	}
 }
 

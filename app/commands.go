@@ -109,6 +109,9 @@ func (d *CommandDispatcher) Dispatch(command string, agentRunning bool, resetCon
 	case "/fork":
 		return d.handleFork(cmdArgs, agentRunning, resetConversation, dimStyle, errorStyle, successStyle)
 
+	case "/rollback":
+		return d.handleRollback(cmdArgs, agentRunning, resetConversation, dimStyle, errorStyle, successStyle)
+
 	case "/rename":
 		d.handleRename(cmdArgs, dimStyle, errorStyle, successStyle)
 		return DispatchResult{Handled: true}
@@ -269,7 +272,7 @@ func (d *CommandDispatcher) handleResume(args string, agentRunning bool, resetCo
 	}
 
 	if args == "" {
-		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /resume <conversation-id>")))
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /resume <conversation-id> [safe-message-count]")))
 		return DispatchResult{Handled: true}
 	}
 
@@ -278,10 +281,27 @@ func (d *CommandDispatcher) handleResume(args string, agentRunning bool, resetCo
 		return DispatchResult{Handled: true}
 	}
 
-	conv, err := d.config.ConvManager.Load(args)
+	resumeID, safeCount, parseErr := parseConversationTarget(args)
+	if parseErr != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  %v", parseErr))))
+		return DispatchResult{Handled: true}
+	}
+
+	conv, err := d.config.ConvManager.Load(resumeID)
 	if err != nil {
 		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error loading conversation: %v", err))))
 		return DispatchResult{Handled: true}
+	}
+
+	if safeCount >= 0 {
+		newTitle := fmt.Sprintf("Recovery from %s", conv.Title)
+		recovered, forkErr := d.config.ConvManager.Fork(conv.ID, newTitle, safeCount)
+		if forkErr != nil {
+			d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error creating recovery fork: %v", forkErr))))
+			return DispatchResult{Handled: true}
+		}
+		conv = recovered
+		d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  Created recovery fork %s from %s at message %d", conv.ID, resumeID, safeCount))))
 	}
 
 	// Reset conversation and load messages
@@ -377,6 +397,62 @@ func (d *CommandDispatcher) handleFork(args string, agentRunning bool, resetConv
 	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  \u2713 Created fork: %s -> %s (%d messages)", source.ID, forked.ID, len(forked.Messages)))))
 
 	return DispatchResult{Handled: true}
+}
+
+// handleRollback truncates an existing conversation to a safe message count and switches to it.
+func (d *CommandDispatcher) handleRollback(args string, agentRunning bool, resetConversation func() ([]llm.Message, []llm.ToolDef), dimStyle, errorStyle, successStyle func() lipgloss.Style) DispatchResult {
+	if d.config.ConvManager == nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Conversation storage not available")))
+		return DispatchResult{Handled: true}
+	}
+
+	if agentRunning {
+		d.p.Send(appendOutputMsg(errorStyle().Render("\n  Cannot rollback while agent is running. Press Ctrl+C first.")))
+		return DispatchResult{Handled: true}
+	}
+
+	convID, keepCount, err := parseConversationTarget(args)
+	if err != nil || keepCount < 0 {
+		d.p.Send(appendOutputMsg(dimStyle().Render("\n  Usage: /rollback <conversation-id> <safe-message-count>")))
+		return DispatchResult{Handled: true}
+	}
+
+	trimmed, truncateErr := d.config.ConvManager.Truncate(convID, keepCount)
+	if truncateErr != nil {
+		d.p.Send(appendOutputMsg(errorStyle().Render(fmt.Sprintf("\n  Error rolling back conversation: %v", truncateErr))))
+		return DispatchResult{Handled: true}
+	}
+
+	d.config.TodoStore.Clear()
+	newMessages, _ := resetConversation()
+	d.config.ConvID = trimmed.ID
+	d.p.Send(newConversationMsg{taskID: trimmed.ID})
+	d.p.Send(appendOutputMsg(successStyle().Render(fmt.Sprintf("\n  Rolled back conversation %s to %d messages", trimmed.ID, len(trimmed.Messages)))))
+
+	var resumed []llm.Message
+	if len(newMessages) > 0 {
+		resumed = append(resumed, newMessages[0])
+	}
+	resumed = append(resumed, trimmed.Messages...)
+
+	return DispatchResult{Handled: true, Messages: resumed}
+}
+
+func parseConversationTarget(args string) (string, int, error) {
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "", -1, fmt.Errorf("missing conversation id")
+	}
+	convID := parts[0]
+	count := -1
+	if len(parts) > 1 {
+		n, err := strconv.Atoi(parts[1])
+		if err != nil || n < 0 {
+			return "", -1, fmt.Errorf("invalid safe message count: %s", parts[1])
+		}
+		count = n
+	}
+	return convID, count, nil
 }
 
 // handleRename renames the current conversation.

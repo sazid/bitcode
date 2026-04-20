@@ -16,6 +16,7 @@ import (
 	"github.com/sazid/bitcode/internal"
 	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
+	"github.com/sazid/bitcode/internal/telemetry"
 )
 
 // --- Custom messages for agent-to-TUI communication ---
@@ -116,6 +117,7 @@ type SessionRuntime struct {
 	permRespCh     chan guard.PermissionResult
 	agentCancel    context.CancelFunc
 	themes         *ThemeRegistry
+	observer       telemetry.Observer
 	flushing       bool
 	ticking        bool
 	agentStartedAt time.Time
@@ -158,6 +160,7 @@ func newSessionModel(config *AgentConfig, themes *ThemeRegistry, commands []Slas
 			input:    input,
 			submitCh: submitCh,
 			themes:   themes,
+			observer: config.Observer,
 		},
 	}
 }
@@ -400,7 +403,10 @@ func (m sessionModel) renderPromptInfoBar() string {
 	}
 	left := strings.Join(leftParts, "  ")
 
-	rightParts := []string{t.ANSI(t.Primary) + "󱙺 BITCODE" + t.ANSIReset()}
+	rightParts := []string{t.ANSI(t.Primary) + "◫ BITCODE" + t.ANSIReset()}
+	if tokens := m.sessionTokenCount(); tokens > 0 {
+		rightParts = append(rightParts, t.ANSI(t.Secondary)+formatCompactTokenCount(tokens)+t.ANSIReset())
+	}
 	if modelLabel := strings.TrimSpace(m.state.Status.Model); modelLabel != "" {
 		rightParts = append(rightParts, t.ANSI(t.Info)+" "+modelLabel+t.ANSIReset())
 	}
@@ -436,6 +442,9 @@ func (m sessionModel) renderSpinnerLine() string {
 		}
 		parts = append(parts, fmt.Sprintf("%s%d %s%s", t.ANSI(t.Secondary), m.state.ToolCallCount, label, t.ANSIReset()))
 	}
+	if tokens := m.sessionTokenCount(); tokens > 0 {
+		parts = append(parts, fmt.Sprintf("%s%s%s", t.ANSI(t.Secondary), formatCompactTokenCount(tokens), t.ANSIReset()))
+	}
 	if m.state.TurnCount > 0 {
 		label := "turns"
 		if m.state.TurnCount == 1 {
@@ -463,6 +472,27 @@ func compactStatusLabel(value string, max int) string {
 
 func summarizeToolName(name string) string {
 	return strings.TrimSpace(name)
+}
+
+func (m sessionModel) sessionTokenCount() int {
+	if m.runtime.observer == nil {
+		return 0
+	}
+	stats := m.runtime.observer.Stats()
+	if stats == nil {
+		return 0
+	}
+	return stats.InputTokens + stats.OutputTokens
+}
+
+func formatCompactTokenCount(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 1_000_000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 }
 
 func plainText(s string) string {

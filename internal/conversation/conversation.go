@@ -247,6 +247,7 @@ func (m *Manager) Fork(sourceID string, newTitle string, msgIdx int) (*Conversat
 		Metadata: Metadata{
 			ID:           generateID(),
 			Title:        truncateTitle(newTitle),
+			WorkDir:      source.WorkDir,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 			MessageCount: msgIdx,
@@ -260,6 +261,34 @@ func (m *Manager) Fork(sourceID string, newTitle string, msgIdx int) (*Conversat
 	}
 
 	return forked, nil
+}
+
+// Truncate rewrites an existing conversation to keep only messages up to msgIdx.
+// If msgIdx is -1, all messages are kept. If msgIdx is 0, all messages are removed.
+func (m *Manager) Truncate(id string, msgIdx int) (*Conversation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	conv, err := m.loadByIDLocked(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if msgIdx < 0 || msgIdx > len(conv.Messages) {
+		msgIdx = len(conv.Messages)
+	}
+
+	trimmed := make([]llm.Message, msgIdx)
+	copy(trimmed, conv.Messages[:msgIdx])
+	conv.Messages = trimmed
+	conv.UpdatedAt = time.Now()
+	conv.MessageCount = len(trimmed)
+
+	if err := m.saveLocked(conv); err != nil {
+		return nil, err
+	}
+
+	return conv, nil
 }
 
 // Rename updates the title of a conversation.
