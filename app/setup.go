@@ -311,7 +311,7 @@ func shouldDelegateToExplore(state *reminder.ConversationState) bool {
 	if state == nil {
 		return false
 	}
-	if state.Turn < 2 {
+	if state.Turn < 2 || recentlyDelegatedTo(state, "explore") {
 		return false
 	}
 
@@ -329,7 +329,7 @@ func shouldDelegateToPlan(state *reminder.ConversationState) bool {
 	if state == nil {
 		return false
 	}
-	if state.Turn < 2 {
+	if state.Turn < 2 || recentlyDelegatedTo(state, "plan") {
 		return false
 	}
 
@@ -342,6 +342,24 @@ func shouldDelegateToPlan(state *reminder.ConversationState) bool {
 		"plan", "steps", "approach", "strategy", "sequence", "risk")
 
 	return planningLanguage || (complexWorkflow && mixedInvestigationAndMutation) || assistantPlanning
+}
+
+const recentDelegationSuppressionWindow = 3
+
+func recentlyDelegatedTo(state *reminder.ConversationState, agentType string) bool {
+	if state == nil || len(state.RecentDelegatedAgents) == 0 {
+		return false
+	}
+	start := len(state.RecentDelegatedAgents) - recentDelegationSuppressionWindow
+	if start < 0 {
+		start = 0
+	}
+	for i := len(state.RecentDelegatedAgents) - 1; i >= start; i-- {
+		if state.RecentDelegatedAgents[i] == agentType {
+			return true
+		}
+	}
+	return false
 }
 
 func countReadOnlyChains(chains []string) int {

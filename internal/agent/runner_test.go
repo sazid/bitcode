@@ -68,6 +68,60 @@ func (t *slowMockTool) Execute(_ json.RawMessage, _ chan<- internal.Event) (tool
 	return tools.ToolResult{Content: t.result}, nil
 }
 
+func TestParseAgentType(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "standard args",
+			args: `{"agent_type":"explore","prompt":"Find files"}`,
+			want: "explore",
+		},
+		{
+			name: "reordered fields and whitespace",
+			args: `{
+				"prompt": "Plan the work",
+				"agent_type": " plan "
+			}`,
+			want: "plan",
+		},
+		{
+			name: "missing agent type",
+			args: `{"prompt":"Find files"}`,
+			want: "",
+		},
+		{
+			name: "invalid json",
+			args: `{"agent_type":`,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseAgentType(tt.args); got != tt.want {
+				t.Fatalf("parseAgentType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendDelegatedAgent(t *testing.T) {
+	history := []string{"a", "b", "c", "d", "e", "f"}
+	got := appendDelegatedAgent(history, `{"prompt":"Find files","agent_type":"explore"}`)
+	want := []string{"b", "c", "d", "e", "f", "explore"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("appendDelegatedAgent() = %#v, want %#v", got, want)
+	}
+
+	unchanged := appendDelegatedAgent(got, `{"prompt":"Find files"}`)
+	if strings.Join(unchanged, ",") != strings.Join(got, ",") {
+		t.Fatalf("appendDelegatedAgent() changed history for missing agent_type: %#v", unchanged)
+	}
+}
+
 func TestRunnerStopResponse(t *testing.T) {
 	provider := &mockProvider{
 		responses: []llm.CompletionResponse{

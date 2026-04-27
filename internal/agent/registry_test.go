@@ -104,8 +104,8 @@ func TestBuiltinDefinitions(t *testing.T) {
 
 	// Verify specific fields
 	explore := byName["explore"]
-	if explore.Model != "claude-haiku-4-5-20251001" {
-		t.Errorf("explore model = %q, want %q", explore.Model, "claude-haiku-4-5-20251001")
+	if explore.Model != "" {
+		t.Errorf("explore model = %q, want empty so it inherits from the parent", explore.Model)
 	}
 	if explore.MaxTurns != 30 {
 		t.Errorf("explore max_turns = %d, want 30", explore.MaxTurns)

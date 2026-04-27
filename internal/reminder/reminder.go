@@ -41,11 +41,12 @@ type Reminder struct {
 
 // ConversationState provides read-only context for evaluating reminder conditions.
 type ConversationState struct {
-	Turn                 int
-	Messages             []llm.Message
-	LastToolCalls        []string
-	RecentToolCallChains []string
-	ElapsedTime          time.Duration
-	AssistantText        string
-	UserText             string
+	Turn                  int
+	Messages              []llm.Message
+	LastToolCalls         []string
+	RecentToolCallChains  []string
+	ElapsedTime           time.Duration
+	AssistantText         string
+	UserText              string
+	RecentDelegatedAgents []string
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -67,6 +68,7 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 	startTime := time.Now()
 	var lastToolNames []string
 	var recentToolCallChains []string
+	var recentDelegatedAgents []string
 	var responseID string    // for StatefulProvider (Responses API)
 	var prevMessageCount int // messages already covered by previous_response_id
 	var totalUsage llm.Usage
@@ -110,13 +112,14 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 		messagesForAPI := messages
 		if cfg.Reminders != nil {
 			state := &reminder.ConversationState{
-				Turn:                 turn,
-				Messages:             messages,
-				LastToolCalls:        lastToolNames,
-				RecentToolCallChains: recentToolCallChains,
-				ElapsedTime:          time.Since(startTime),
-				AssistantText:        latestAssistantText(messages),
-				UserText:             latestUserText(messages),
+				Turn:                  turn,
+				Messages:              messages,
+				LastToolCalls:         lastToolNames,
+				RecentToolCallChains:  recentToolCallChains,
+				ElapsedTime:           time.Since(startTime),
+				AssistantText:         latestAssistantText(messages),
+				UserText:              latestUserText(messages),
+				RecentDelegatedAgents: append([]string(nil), recentDelegatedAgents...),
 			}
 			if active := cfg.Reminders.Evaluate(state); len(active) > 0 {
 				messagesForAPI = reminder.InjectReminders(messages, active)
@@ -248,6 +251,9 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 			lastToolNames = make([]string, 0, len(resp.Message.ToolCalls))
 			for _, tc := range resp.Message.ToolCalls {
 				lastToolNames = append(lastToolNames, tc.Name)
+				if tc.Name == "Agent" {
+					recentDelegatedAgents = appendDelegatedAgent(recentDelegatedAgents, tc.Arguments)
+				}
 			}
 			if len(lastToolNames) > 0 {
 				recentToolCallChains = append(recentToolCallChains, strings.Join(lastToolNames, ">"))
@@ -539,6 +545,28 @@ func latestAssistantText(messages []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+func appendDelegatedAgent(history []string, rawArgs string) []string {
+	agentType := parseAgentType(rawArgs)
+	if agentType == "" {
+		return history
+	}
+	history = append(history, agentType)
+	if len(history) > 6 {
+		history = history[len(history)-6:]
+	}
+	return history
+}
+
+func parseAgentType(rawArgs string) string {
+	var parsed struct {
+		AgentType string `json:"agent_type"`
+	}
+	if err := json.Unmarshal([]byte(rawArgs), &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.AgentType)
 }
 
 // persistMessage appends a message to conversation storage if available.

@@ -43,7 +43,7 @@ func (t *AgentTool) Name() string { return "Agent" }
 
 func (t *AgentTool) Description() string {
 	var sb strings.Builder
-	sb.WriteString("Spawn a specialized subagent to handle a bounded task. Use this when the work is complex, cross-file, ambiguous, or easy to isolate from the main thread. The subagent runs autonomously with its own context and returns its final output.\n\nAvailable agent types:\n")
+	sb.WriteString("Spawn a specialized subagent to handle a bounded task. Use this when the work is complex, cross-file, ambiguous, or easy to isolate from the main thread. The subagent runs autonomously with its own context and returns its final output. Explore and plan subagents return structured results so the parent can reuse findings and plans directly.\n\nAvailable agent types:\n")
 	for _, def := range t.Registry.List() {
 		fmt.Fprintf(&sb, "- %s: %s\n", def.Name, def.Description)
 	}
@@ -152,7 +152,130 @@ func (t *AgentTool) Execute(input json.RawMessage, eventsCh chan<- internal.Even
 		}
 	}
 
-	return tools.ToolResult{Content: output}, nil
+	return tools.ToolResult{Content: normalizeSubagentOutput(params.AgentType, params.Prompt, output)}, nil
+}
+
+func normalizeSubagentOutput(agentType, task, output string) string {
+	switch agentType {
+	case "explore":
+		return normalizeStructuredSubagentOutput("explore_result", task, output, []string{"Summary", "Findings", "Relevant Files", "Next Steps"})
+	case "plan":
+		return normalizeStructuredSubagentOutput("plan_result", task, output, []string{"Summary", "Steps", "Risks", "Verification"})
+	default:
+		return output
+	}
+}
+
+func normalizeStructuredSubagentOutput(rootTag, task, output string, orderedSections []string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return output
+	}
+	if strings.HasPrefix(trimmed, "<"+rootTag+">") {
+		return trimmed
+	}
+
+	sections, orderedSectionsByAppearance, remainder := extractMarkdownSections(trimmed)
+	knownSections := make(map[string]bool, len(orderedSections))
+	for _, section := range orderedSections {
+		knownSections[strings.ToLower(section)] = true
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "<%s>\n", rootTag)
+	if strings.TrimSpace(task) != "" {
+		fmt.Fprintf(&sb, "<task>%s</task>\n", xmlEscape(strings.TrimSpace(task)))
+	}
+
+	wroteStructured := false
+	for _, section := range orderedSections {
+		content := strings.TrimSpace(sections[strings.ToLower(section)])
+		if content == "" {
+			continue
+		}
+		tag := strings.ToLower(strings.ReplaceAll(section, " ", "_"))
+		fmt.Fprintf(&sb, "<%s>%s</%s>\n", tag, xmlEscape(content), tag)
+		wroteStructured = true
+	}
+
+	var notes []string
+	if extra := strings.TrimSpace(remainder); extra != "" {
+		notes = append(notes, extra)
+	}
+	for _, section := range orderedSectionsByAppearance {
+		if knownSections[section.key] {
+			continue
+		}
+		if text := strings.TrimSpace(section.content); text != "" {
+			notes = append(notes, fmt.Sprintf("## %s\n%s", section.title, text))
+		}
+	}
+	if len(notes) > 0 && wroteStructured {
+		fmt.Fprintf(&sb, "<notes>%s</notes>\n", xmlEscape(strings.Join(notes, "\n\n")))
+	}
+
+	if !wroteStructured {
+		fmt.Fprintf(&sb, "<report>%s</report>\n", xmlEscape(trimmed))
+	}
+	fmt.Fprintf(&sb, "</%s>", rootTag)
+	return sb.String()
+}
+
+type markdownSection struct {
+	title   string
+	key     string
+	content string
+}
+
+func extractMarkdownSections(output string) (map[string]string, []markdownSection, string) {
+	sections := make(map[string]string)
+	var ordered []markdownSection
+	var remainder strings.Builder
+	var currentTitle string
+	var currentKey string
+	var currentContent strings.Builder
+	flush := func() {
+		text := strings.TrimSpace(currentContent.String())
+		if text == "" {
+			currentContent.Reset()
+			return
+		}
+		if currentKey == "" {
+			if remainder.Len() > 0 {
+				remainder.WriteString("\n")
+			}
+			remainder.WriteString(text)
+		} else {
+			sections[currentKey] = text
+			ordered = append(ordered, markdownSection{
+				title:   currentTitle,
+				key:     currentKey,
+				content: text,
+			})
+		}
+		currentContent.Reset()
+	}
+
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			flush()
+			currentTitle = strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			currentKey = strings.ToLower(currentTitle)
+			continue
+		}
+		currentContent.WriteString(line)
+		currentContent.WriteString("\n")
+	}
+	flush()
+	return sections, ordered, strings.TrimSpace(remainder.String())
+}
+
+func xmlEscape(text string) string {
+	text = strings.ReplaceAll(text, "&", "&amp;")
+	text = strings.ReplaceAll(text, "<", "&lt;")
+	text = strings.ReplaceAll(text, ">", "&gt;")
+	return text
 }
 
 func (t *AgentTool) buildSubagentConfig(def Definition, parentEventsCh chan<- internal.Event) (*Config, error) {

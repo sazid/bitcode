@@ -425,17 +425,26 @@ func TestParseConditionString(t *testing.T) {
 	})
 }
 
-func TestConversationStateCarriesPromptText(t *testing.T) {
-	state := &ConversationState{
-		UserText:      "find the parser entrypoint",
-		AssistantText: "Let me inspect the relevant files.",
+func TestConversationStateIncludesPromptTextAndDelegations(t *testing.T) {
+	state := ConversationState{
+		Turn:                  3,
+		AssistantText:         "let me inspect",
+		UserText:              "find the bug",
+		RecentDelegatedAgents: []string{"explore", "plan"},
 	}
-	if state.UserText == "" || state.AssistantText == "" {
-		t.Fatal("expected prompt text fields to be available on conversation state")
+
+	if state.AssistantText != "let me inspect" {
+		t.Fatalf("expected assistant text to round-trip, got %q", state.AssistantText)
+	}
+	if state.UserText != "find the bug" {
+		t.Fatalf("expected user text to round-trip, got %q", state.UserText)
+	}
+	if len(state.RecentDelegatedAgents) != 2 {
+		t.Fatalf("expected delegated agent history, got %#v", state.RecentDelegatedAgents)
 	}
 }
 
-func TestLoadPlugins_Markdown(t *testing.T) {
+func TestConvertRawToReminder_Markdown(t *testing.T) {
 	content := "---\nid: test-plugin\nschedule:\n  kind: always\npriority: 5\n---\nRemember to test everything."
 	metadata, body := plugin.ParseFrontmatter(content)
 

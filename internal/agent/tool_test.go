@@ -59,8 +59,8 @@ func TestAgentToolBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Content != "Found 5 test files." {
-		t.Errorf("expected 'Found 5 test files.', got %q", result.Content)
+	if result.Content != "<explore_result>\n<task>Find test files</task>\n<report>Found 5 test files.</report>\n</explore_result>" {
+		t.Errorf("expected structured explore result, got %q", result.Content)
 	}
 
 	// Verify events were prefixed
@@ -215,5 +215,60 @@ func TestAgentToolToolFiltering(t *testing.T) {
 	// then responded with text
 	if result.Content != "write failed as expected" {
 		t.Errorf("unexpected content: %q", result.Content)
+	}
+}
+
+func TestNormalizeSubagentOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentType string
+		task      string
+		output    string
+		want      string
+	}{
+		{
+			name:      "plain explore output becomes report",
+			agentType: "explore",
+			task:      "Find test files",
+			output:    "Found 5 test files.",
+			want:      "<explore_result>\n<task>Find test files</task>\n<report>Found 5 test files.</report>\n</explore_result>",
+		},
+		{
+			name:      "markdown explore sections become tags",
+			agentType: "explore",
+			task:      "Trace auth",
+			output:    "Preamble\n\n## Summary\nAuth starts in main.\n\n## Findings\nCall path uses <token> & cache.\n\n## Relevant Files\n- app/main.go\n\n## Caveat\nNeeds live config.",
+			want:      "<explore_result>\n<task>Trace auth</task>\n<summary>Auth starts in main.</summary>\n<findings>Call path uses &lt;token&gt; &amp; cache.</findings>\n<relevant_files>- app/main.go</relevant_files>\n<notes>Preamble\n\n## Caveat\nNeeds live config.</notes>\n</explore_result>",
+		},
+		{
+			name:      "plan output uses plan result tag",
+			agentType: "plan",
+			task:      "Plan refactor",
+			output:    "## Steps\n1. Move interfaces.\n\n## Verification\ngo test ./internal/agent",
+			want:      "<plan_result>\n<task>Plan refactor</task>\n<steps>1. Move interfaces.</steps>\n<verification>go test ./internal/agent</verification>\n</plan_result>",
+		},
+		{
+			name:      "already structured output is preserved",
+			agentType: "explore",
+			task:      "Find files",
+			output:    "  <explore_result>\n<summary>Done</summary>\n</explore_result>  ",
+			want:      "<explore_result>\n<summary>Done</summary>\n</explore_result>",
+		},
+		{
+			name:      "general purpose output is untouched",
+			agentType: "general-purpose",
+			task:      "Do it",
+			output:    "Done",
+			want:      "Done",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeSubagentOutput(tt.agentType, tt.task, tt.output)
+			if got != tt.want {
+				t.Fatalf("normalizeSubagentOutput() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
