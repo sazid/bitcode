@@ -14,6 +14,12 @@ type ToolRegistry interface {
 	ToolDefinitions() []ToolDefinition
 }
 
+// ToolInputNormalizer is implemented by registries that can validate and repair
+// raw model-generated tool arguments before guard checks or execution.
+type ToolInputNormalizer interface {
+	NormalizeToolInput(toolName string, input string) (string, []InputRepair, error)
+}
+
 type Manager struct {
 	tools map[string]Tool
 }
@@ -72,7 +78,21 @@ func (m *Manager) ExecuteTool(toolName string, input string, eventsCh chan<- int
 		return ToolResult{}, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	return tool.Execute(json.RawMessage(input), eventsCh)
+	normalizedInput, _, err := normalizeInputForTool(toolName, input, tool.ParametersSchema())
+	if err != nil {
+		return ToolResult{}, err
+	}
+
+	return tool.Execute(json.RawMessage(normalizedInput), eventsCh)
+}
+
+func (m *Manager) NormalizeToolInput(toolName string, input string) (string, []InputRepair, error) {
+	tool, ok := m.Get(toolName)
+	if !ok {
+		return "", nil, fmt.Errorf("unknown tool: %s", toolName)
+	}
+
+	return normalizeInputForTool(toolName, input, tool.ParametersSchema())
 }
 
 type ToolDefinition struct {

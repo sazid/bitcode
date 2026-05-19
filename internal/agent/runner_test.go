@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sazid/bitcode/internal"
+	"github.com/sazid/bitcode/internal/guard"
 	"github.com/sazid/bitcode/internal/llm"
 	"github.com/sazid/bitcode/internal/reminder"
 	"github.com/sazid/bitcode/internal/tools"
@@ -66,6 +67,31 @@ func (t *slowMockTool) ParametersSchema() map[string]any { return map[string]any
 func (t *slowMockTool) Execute(_ json.RawMessage, _ chan<- internal.Event) (tools.ToolResult, error) {
 	<-t.wait
 	return tools.ToolResult{Content: t.result}, nil
+}
+
+type captureInputTool struct {
+	name   string
+	schema map[string]any
+	input  string
+}
+
+func (t *captureInputTool) Name() string        { return t.name }
+func (t *captureInputTool) Description() string { return "capture " + t.name }
+func (t *captureInputTool) ParametersSchema() map[string]any {
+	return t.schema
+}
+func (t *captureInputTool) Execute(input json.RawMessage, _ chan<- internal.Event) (tools.ToolResult, error) {
+	t.input = string(input)
+	return tools.ToolResult{Content: "ok"}, nil
+}
+
+type captureGuard struct {
+	input string
+}
+
+func (g *captureGuard) Evaluate(_ context.Context, _ string, input string, _ chan<- internal.Event) (*guard.Decision, error) {
+	g.input = input
+	return &guard.Decision{Verdict: guard.VerdictAllow, Reason: "ok"}, nil
 }
 
 func TestParseAgentType(t *testing.T) {
@@ -202,6 +228,61 @@ func TestRunnerToolCall(t *testing.T) {
 	// system + user + assistant(tool_call) + tool_result + assistant(done) = 5
 	if len(result.Messages) != 5 {
 		t.Errorf("expected 5 messages, got %d", len(result.Messages))
+	}
+}
+
+func TestRunnerNormalizesToolInputBeforeGuardAndExecution(t *testing.T) {
+	provider := &mockProvider{
+		responses: []llm.CompletionResponse{
+			{
+				Message: llm.Message{
+					Role:    llm.RoleAssistant,
+					Content: []llm.ContentBlock{{Type: llm.ContentText, Text: "Reading."}},
+					ToolCalls: []llm.ToolCall{
+						{ID: "tc1", Name: "Read", Arguments: `{"path":"test.go","limit":"5"}`},
+					},
+				},
+				FinishReason: llm.FinishToolCalls,
+			},
+			{
+				Message:      llm.TextMessage(llm.RoleAssistant, "Done."),
+				FinishReason: llm.FinishStop,
+			},
+		},
+	}
+
+	mgr := tools.NewManager()
+	captureTool := &captureInputTool{name: "Read", schema: (&tools.ReadTool{}).ParametersSchema()}
+	mgr.Register(captureTool)
+	captureGuard := &captureGuard{}
+
+	cfg := &Config{
+		Provider: provider,
+		Tools:    mgr,
+		Guard:    captureGuard,
+		MaxTurns: 10,
+	}
+
+	runner := NewRunner(cfg, Callbacks{})
+	_, err := runner.Run(context.Background(), []llm.Message{llm.TextMessage(llm.RoleUser, "Read test.go")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, raw := range []string{captureGuard.input, captureTool.input} {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(raw), &got); err != nil {
+			t.Fatalf("captured input is not valid JSON: %s: %v", raw, err)
+		}
+		if got["file_path"] != "test.go" {
+			t.Fatalf("file_path = %#v, want test.go in %s", got["file_path"], raw)
+		}
+		if _, ok := got["path"]; ok {
+			t.Fatalf("path alias should have been removed before guard/execution: %s", raw)
+		}
+		if got["limit"] != float64(5) {
+			t.Fatalf("limit = %#v, want 5 in %s", got["limit"], raw)
+		}
 	}
 }
 

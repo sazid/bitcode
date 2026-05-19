@@ -41,3 +41,11 @@ func (w *toolRegistryWrapper) ExecuteTool(toolName string, input string, eventsC
 func (w *toolRegistryWrapper) ToolDefinitions() []tools.ToolDefinition {
 	return w.inner.ToolDefinitions()
 }
+
+func (w *toolRegistryWrapper) NormalizeToolInput(toolName string, input string) (string, []tools.InputRepair, error) {
+	normalizer, ok := w.inner.(tools.ToolInputNormalizer)
+	if !ok {
+		return input, nil, nil
+	}
+	return normalizer.NormalizeToolInput(toolName, input)
+}

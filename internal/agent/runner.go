@@ -353,6 +353,31 @@ func (r *Runner) Run(ctx context.Context, messages []llm.Message) (*Result, erro
 func (r *Runner) executeToolCall(ctx context.Context, tc llm.ToolCall, eventsCh chan<- internal.Event) llm.Message {
 	cfg := r.config
 
+	if normalizer, ok := cfg.Tools.(tools.ToolInputNormalizer); ok {
+		normalizedArgs, repairs, err := normalizer.NormalizeToolInput(tc.Name, tc.Arguments)
+		if err != nil {
+			eventsCh <- internal.Event{
+				Name:    fmt.Sprintf("tool_input_invalid:%s", tc.Name),
+				Message: fmt.Sprintf("Error: %v", err),
+				IsError: true,
+			}
+			return llm.Message{
+				Role:       llm.RoleTool,
+				Content:    []llm.ContentBlock{{Type: llm.ContentText, Text: buildToolInputInvalidMessage(tc, err)}},
+				ToolCallID: tc.ID,
+			}
+		}
+		if len(repairs) > 0 {
+			eventsCh <- internal.Event{
+				Name:        fmt.Sprintf("tool_input_repaired:%s", tc.Name),
+				Message:     fmt.Sprintf("Repaired %d issue(s)", len(repairs)),
+				Preview:     formatInputRepairPreview(repairs),
+				PreviewType: internal.PreviewPlain,
+			}
+			tc.Arguments = normalizedArgs
+		}
+	}
+
 	// Guard check
 	if cfg.Guard != nil {
 		decision, guardErr := cfg.Guard.Evaluate(ctx, tc.Name, tc.Arguments, eventsCh)
@@ -437,6 +462,18 @@ func buildIncompleteTodosReminder(todos []tools.TodoItem) string {
 
 func buildToolFailureMessage(tc llm.ToolCall, err error) string {
 	return fmt.Sprintf("Tool call failed for %s.\nArguments: %s\nError: %v\nReflect on why this failed, fix the tool call, and try again if the task still requires it.", tc.Name, tc.Arguments, err)
+}
+
+func buildToolInputInvalidMessage(tc llm.ToolCall, err error) string {
+	return fmt.Sprintf("Tool call invalid for %s.\nArguments: %s\nIssue: %v\nFix the arguments to match this tool's schema and try again if the task still requires it.", tc.Name, tc.Arguments, err)
+}
+
+func formatInputRepairPreview(repairs []tools.InputRepair) []string {
+	lines := make([]string, 0, len(repairs))
+	for _, repair := range repairs {
+		lines = append(lines, repair.String())
+	}
+	return lines
 }
 
 // executeToolCallsParallel runs multiple safe regular tool calls concurrently
